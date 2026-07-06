@@ -1,0 +1,24 @@
+# IDX Analyst Bot v4 — Dependencies (No ML)
+discord.py>=2.3.2
+groq>=0.9.0
+python-dotenv>=1.0.0
+yfinance>=0.2.36
+pandas>=2.1.0
+numpy>=1.26.0
+requests>=2.31.0
+aiohttp>=3.9.0
+aiofiles>=23.0.0
+feedparser>=6.0.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+scipy>=1.12.0
+scikit-learn>=1.4.0
+redis>=5.0.0
+# cvxpy>=1.4.0          # uncomment for CVaR exact optimization
+# chromadb>=0.4.22       # uncomment for vector RAG memory
+# sentence-transformers>=2.5.0
+prometheus-client>=0.19.0
+python-dateutil>=2.8.0

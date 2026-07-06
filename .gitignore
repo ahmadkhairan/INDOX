@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment — JANGAN di-commit
+.venv/
+venv/
+env/
+ENV/
+
+# Environment variables — RAHASIA, jangan di-commit!
+.env
+
+# Bot persistent data
+data/alerts.json
+data/daily_picks_history.json
+data/picks_cache_date.json
+data/all_liquid_tickers.json
+data/*.lock
+memory/memory_store.json
+memory/*.lock
+memory/chroma_db/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db

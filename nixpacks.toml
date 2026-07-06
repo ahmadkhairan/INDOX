@@ -1,0 +1,20 @@
+[phases.setup]
+nixPkgs = ["python312", "gcc"]
+
+[phases.install]
+cmds = ["pip install --upgrade pip", "pip install -r requirements.txt"]
+
+[phases.build]
+cmds = ["mkdir -p memory chroma_db"]
+
+[start]
+cmd = "python bot.py"
+
+[variables]
+PYTHONUNBUFFERED = "1"
+ENV = "production"
+LOG_FORMAT = "json"
+FEAT_RAG = "false"
+FEAT_RISK = "true"
+FEAT_SENT = "true"
+FEAT_OPT = "true"
