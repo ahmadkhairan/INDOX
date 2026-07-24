@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import api.app as api_app
-from data import alert_store
+from data import alert_store_sqlite
 from utils.fundamental_utils import normalize_der
 from utils.groq_utils import validate_groq_config
 from utils.json_store import read_json, write_json
@@ -30,19 +30,19 @@ class JsonStoreTests(unittest.TestCase):
 
 
 class AlertStorePersistenceTests(unittest.TestCase):
-    def test_alert_store_persists_with_atomic_helper(self):
+    def test_alert_store_persists_with_sqlite(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            alert_file = Path(tmpdir) / "alerts.json"
-            cache_file = Path(tmpdir) / "picks_cache_date.json"
-            with patch.object(alert_store, "ALERT_FILE", str(alert_file)), patch.object(alert_store, "CACHE_DATE_FILE", str(cache_file)):
-                store = alert_store.AlertStore()
-                self.assertTrue(store.add(1, "BBCA", ">", 9000))
-                reloaded = alert_store.AlertStore()
-                alerts = reloaded.get_user_alerts(1)
-                self.assertEqual(len(alerts), 1)
-                self.assertEqual(alerts[0]["ticker"], "BBCA")
-                alert_store.set_picks_cache_date("2026-04-05")
-                self.assertEqual(alert_store.get_picks_cache_date(), "2026-04-05")
+            db_file = Path(tmpdir) / "alerts_test.db"
+            store = alert_store_sqlite.AlertStoreSQLite(db_path=str(db_file))
+            self.assertTrue(store.add(1, "BBCA", ">", 9000))
+            reloaded = alert_store_sqlite.AlertStoreSQLite(db_path=str(db_file))
+            alerts = reloaded.get_user_alerts(1)
+            self.assertEqual(len(alerts), 1)
+            self.assertEqual(alerts[0]["ticker"], "BBCA")
+            
+            cache_store = alert_store_sqlite._PicksCacheDateStore(db_path=str(db_file))
+            cache_store.set("2026-04-05")
+            self.assertEqual(cache_store.get(), "2026-04-05")
 
 
 class GroqValidationTests(unittest.TestCase):

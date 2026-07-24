@@ -8,7 +8,7 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 
-from data.alert_store import get_alert_store
+from data.alert_store_sqlite import get_alert_store
 from config import ALERT_CHECK_SECONDS
 from utils.helpers import send_long
 from utils.ticker_utils import normalize_ticker
