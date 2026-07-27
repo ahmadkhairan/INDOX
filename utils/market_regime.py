@@ -135,17 +135,15 @@ def get_ihsg_regime() -> dict:
     try:
         hist = get_history("^JKSE", period="1y", interval="1d", auto_adjust=True)
         if hist.empty or len(hist) < 50:
-            result = {"regime": "UNKNOWN", "warning": "", "ihsg_ma200": 0.0, "ihsg_last": 0.0}
+            result = {"regime": "UNKNOWN", "warning": "", "ihsg_ma50": 0.0, "ihsg_ma200": 0.0, "ihsg_last": 0.0, "ma_label": "MA50"}
             _ihsg_regime_cache.update({"ts": now_ts, "data": result})
             return result
 
         close = hist["Close"].astype(float)
-        if len(close) >= 200:
-            ma_val = float(close.rolling(200).mean().iloc[-1])
-            ma_label = "MA200"
-        else:
-            ma_val = float(close.rolling(50).mean().iloc[-1])
-            ma_label = "MA50"
+        # Regime guard untuk pick memakai MA50. ihsg_ma200 dipertahankan
+        # sebagai alias agar consumer lama tetap kompatibel.
+        ma_val = float(close.rolling(50).mean().iloc[-1])
+        ma_label = "MA50"
 
         consecutive_bear = 0
         for price in close.values[::-1][:10]:
@@ -158,14 +156,14 @@ def get_ihsg_regime() -> dict:
         if consecutive_bear >= 3:
             regime = "BEAR"
             warning = (
-                f"⚠️ **BEAR MARKET WARNING**: IHSG di bawah {ma_label} ({ma_val:,.0f}) "
+                f"**BEAR MARKET WARNING**: IHSG di bawah {ma_label} ({ma_val:,.0f}) "
                 f"selama {consecutive_bear} hari berturut-turut. Semua entry baru DILARANG — "
                 f"tunggu IHSG tutup di atas {ma_label} minimal 2 hari berturut-turut sebelum re-entry."
             )
         elif consecutive_bear >= 1:
             regime = "CAUTION"
             warning = (
-                f"🟡 **CAUTION**: IHSG mendekati/menyentuh {ma_label} ({ma_val:,.0f}) "
+                f"**CAUTION**: IHSG mendekati/menyentuh {ma_label} ({ma_val:,.0f}) "
                 f"({consecutive_bear} hari bear). Kurangi ukuran posisi 50%, perkuat SL."
             )
         else:
@@ -175,6 +173,7 @@ def get_ihsg_regime() -> dict:
         result = {
             "regime": regime,
             "warning": warning,
+            "ihsg_ma50": round(ma_val, 2),
             "ihsg_ma200": round(ma_val, 2),
             "ihsg_last": last_price,
             "bear_streak": consecutive_bear,
@@ -184,12 +183,12 @@ def get_ihsg_regime() -> dict:
         return result
     except YFinanceUnavailable as exc:
         print(f"[regime] ⚠️ yfinance unavailable: {exc}")
-        result = {"regime": "UNKNOWN", "warning": "Data pasar sementara tidak tersedia", "ihsg_ma200": 0.0, "ihsg_last": 0.0}
+        result = {"regime": "UNKNOWN", "warning": "Data pasar sementara tidak tersedia", "ihsg_ma50": 0.0, "ihsg_ma200": 0.0, "ihsg_last": 0.0, "ma_label": "MA50"}
         _ihsg_regime_cache.update({"ts": now_ts - 1500, "data": result})
         return result
     except Exception as exc:
         print(f"[regime] ⚠️ Error: {exc}")
-        result = {"regime": "UNKNOWN", "warning": "", "ihsg_ma200": 0.0, "ihsg_last": 0.0}
+        result = {"regime": "UNKNOWN", "warning": "", "ihsg_ma50": 0.0, "ihsg_ma200": 0.0, "ihsg_last": 0.0, "ma_label": "MA50"}
         _ihsg_regime_cache.update({"ts": now_ts - 1500, "data": result})
         return result
 

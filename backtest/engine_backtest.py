@@ -94,6 +94,7 @@ class MCResult:
     sharpe_median: float
     confidence: str
     block_size: int = MC_BOOTSTRAP_BLOCK
+    mdd_p5: float = 0.0
 
 
 class EntryMode(str, Enum):
@@ -347,7 +348,7 @@ class SingleBT:
             self._gv(ma200, len(df) - 1),
         )
 
-    def run(self, df, ticker="") -> PeriodResult:
+    def run(self, df, ticker="", evaluation_start: int = 60) -> PeriodResult:
         if len(df) < 60:
             return self._empty(ticker)
 
@@ -386,6 +387,10 @@ class SingleBT:
         pause_until = -1
         eq = [1.0]
 
+        # Indicators need a warm-up window. Walk-forward passes historical
+        # IS rows before OOS and sets evaluation_start to the OOS boundary;
+        # entries before that boundary are deliberately ignored.
+        evaluation_start = max(60, min(int(evaluation_start), n))
         for i in range(60, n):
             price = self._gv(c, i)
             hd = self._gv(h, i)
@@ -436,6 +441,10 @@ class SingleBT:
                         )
                     )
                     in_trade = False
+                eq.append(equity)
+                continue
+
+            if i < evaluation_start:
                 eq.append(equity)
                 continue
 
@@ -605,7 +614,16 @@ class WalkForwardEngine:
             best_params, r_is = self._optimize_params(is_df, ticker)
             r_is.label = f"IS-{win}"
             r_is.oos = False
-            r_oos = SingleBT(best_params).run(oos_df, ticker)
+            # Preserve IS history as indicator warm-up. Running on the bare
+            # two-month OOS slice would always return zero trades because
+            # SingleBT requires 60 rows before it evaluates entries.
+            warmup = is_df.tail(60)
+            oos_input = pd.concat([warmup, oos_df])
+            r_oos = SingleBT(best_params).run(
+                oos_input,
+                ticker,
+                evaluation_start=len(warmup),
+            )
             r_oos.label = f"OOS-{win}"
             r_oos.oos = True
             is_res.append(r_is)
@@ -617,18 +635,26 @@ class WalkForwardEngine:
 
         is_agg = self._agg(is_res, False, ticker)
         oos_agg = self._agg(oos_res, True, ticker)
-        rob = round(
-            min(
-                2.0,
-                (
-                    oos_agg.win_rate / (is_agg.win_rate + 1e-8) * 0.4
-                    + oos_agg.pf / (is_agg.pf + 1e-8) * 0.4
-                    + max(0, oos_agg.total_return) / max(1, is_agg.total_return) * 0.2
-                ),
-            ),
-            3,
+        valid_oos = [period for period in oos_res if period.total_trades > 0]
+        positive_oos_rate = (
+            sum(1 for period in valid_oos if period.total_return > 0) / len(valid_oos)
+            if valid_oos else 0.0
         )
-        is_robust = oos_agg.win_rate >= 45 and oos_agg.pf >= 1.4
+        sample_score = min(oos_agg.total_trades / 30.0, 1.0)
+        robustness_score = (
+            min(max(oos_agg.pf / 1.4, 0.0), 1.0) * 0.30
+            + min(max(oos_agg.win_rate / 55.0, 0.0), 1.0) * 0.20
+            + positive_oos_rate * 0.25
+            + sample_score * 0.25
+        )
+        rob = round(robustness_score, 3)
+        is_robust = (
+            oos_agg.total_trades >= 30
+            and oos_agg.total_return > 0
+            and oos_agg.win_rate >= 45
+            and oos_agg.pf >= 1.2
+            and positive_oos_rate >= 0.5
+        )
         recs = []
         if not is_robust:
             recs.append("Tidak robust di OOS; tahan live trading dulu.")
@@ -638,6 +664,8 @@ class WalkForwardEngine:
             recs.append("Robust untuk mode agresif; sizing tetap harus disiplin.")
         if oos_agg.total_trades < 8:
             recs.append("Sample OOS masih tipis; tambah periode validasi.")
+        if positive_oos_rate < 0.5:
+            recs.append("Kurang dari separuh window OOS positif; parameter belum stabil lintas periode.")
         return WFResult(
             ticker=ticker,
             is_periods=is_res,
@@ -707,6 +735,11 @@ class WalkForwardEngine:
         wins = [pnl for pnl in pnls if pnl > 0]
         losses = [abs(pnl) for pnl in pnls if pnl <= 0]
         params = periods[-1].params if periods else {}
+        compounded_return = (np.prod([1.0 + pnl / 100.0 for pnl in pnls]) - 1.0) * 100.0
+        equity = np.cumprod([1.0] + [1.0 + pnl / 100.0 for pnl in pnls])
+        rolling_max = np.maximum.accumulate(equity)
+        aggregate_dd = float(((equity - rolling_max) / (rolling_max + 1e-8)).min()) * 100.0
+        active_sharpes = [period.sharpe for period in periods if period.total_trades > 0]
         return PeriodResult(
             label="OOS_AGG" if is_oos else "IS_AGG",
             start=periods[0].start,
@@ -715,9 +748,9 @@ class WalkForwardEngine:
             total_trades=len(all_trades),
             win_rate=round(len(wins) / len(pnls) * 100, 1),
             pf=round(sum(wins) / (sum(losses) + 1e-8), 2),
-            total_return=round(sum(pnls), 2),
-            max_dd=round(min(period.max_dd for period in periods), 2),
-            sharpe=round(float(np.mean([period.sharpe for period in periods if period.sharpe != 0])), 3),
+            total_return=round(compounded_return, 2),
+            max_dd=round(aggregate_dd, 2),
+            sharpe=round(float(np.mean(active_sharpes)) if active_sharpes else 0.0, 3),
             avg_win=round(float(np.mean(wins)) if wins else 0, 2),
             avg_loss=round(float(np.mean(losses)) if losses else 0, 2),
             params=params,
@@ -750,7 +783,7 @@ class MonteCarloEngine:
         n = len(pnls)
         block = self._choose_block_size(pnls)
         rng = np.random.default_rng(42)
-        sim_ret, sim_mdd = [], []
+        sim_ret, sim_mdd, sim_sharpe = [], [], []
 
         for _ in range(n_sim):
             sim = []
@@ -758,15 +791,21 @@ class MonteCarloEngine:
                 start = rng.integers(0, max(1, n - block + 1))
                 sim.extend(pnls[start:start + block].tolist())
             sim = np.array(sim[:n])
-            eq = np.cumprod(1 + sim * 0.01)
+            # Trade.pnl_pct is already converted to decimal above.
+            # Multiplying by 0.01 again understated every simulated return
+            # by 100x and made the MC output misleadingly flat.
+            eq = np.cumprod(1 + sim)
             sim_ret.append(float(eq[-1] - 1) * 100)
             rolling_max = np.maximum.accumulate(eq)
             sim_mdd.append(float(((eq - rolling_max) / (rolling_max + 1e-8)).min()) * 100)
+            sim_sharpe.append(float(np.mean(sim) / (np.std(sim) + 1e-8)) * np.sqrt(len(sim)))
 
         arr = np.array(sim_ret)
         marr = np.array(sim_mdd)
         ret_range = float(np.percentile(arr, 95)) - float(np.percentile(arr, 5))
         confidence = "HIGH" if ret_range < 20 else ("MEDIUM" if ret_range < 50 else "LOW")
+        if n < 30:
+            confidence = "LOW"
         return MCResult(
             ticker=trades[0].ticker,
             n_sim=n_sim,
@@ -779,9 +818,10 @@ class MonteCarloEngine:
             prob_above_10=round(float((arr > 10).mean() * 100), 1),
             mdd_median=round(float(np.median(marr)), 2),
             mdd_p95=round(float(np.percentile(marr, 95)), 2),
-            sharpe_median=round(float(np.mean(arr) / (np.std(arr) + 1e-8)), 3),
+            sharpe_median=round(float(np.median(sim_sharpe)), 3),
             confidence=confidence,
             block_size=block,
+            mdd_p5=round(float(np.percentile(marr, 5)), 2),
         )
 
     def _choose_block_size(self, pnls: np.ndarray) -> int:
@@ -808,7 +848,7 @@ class MonteCarloEngine:
 
 async def run_backtest_v4(
     ticker,
-    months=3,
+    months=12,
     sl_mult=1.5,
     tp_mult=2.0,
     use_regime=True,

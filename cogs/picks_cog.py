@@ -45,7 +45,7 @@ class PicksCog(commands.Cog):
             if DAILY_CHANNEL_ID:
                 channel = self.bot.get_channel(DAILY_CHANNEL_ID)
                 if channel:
-                    await channel.send("@here 📊 **Daily Picks IDX tersedia!**")
+                    await channel.send("@here **Daily Picks IDX tersedia**")
                     await send_long(channel, response)
                     set_picks_cache_date(today)
 
@@ -85,7 +85,7 @@ class PicksCog(commands.Cog):
     @commands.cooldown(*PICKS_COOLDOWN, commands.BucketType.user)
     async def cmd_pickstats(self, ctx):
         """!pickstats — hit-rate real 30 hari picks"""
-        msg = await ctx.reply("⏳ Menghitung performa picks 30 hari terakhir…")
+        msg = await ctx.reply("Menghitung performa picks 30 hari terakhir...")
         text = await self._build_pick_stats()
         await msg.delete()
         await ctx.reply(text)
@@ -106,8 +106,8 @@ class PicksCog(commands.Cog):
         if r == "BEAR":
             msg = Msg.picks_bear_regime(
                 last=regime.get("ihsg_last", 0),
-                ma200=regime.get("ihsg_ma200", 0),
-                ma_label=regime.get("ma_label", "MA200"),
+                ma200=regime.get("ihsg_ma50", regime.get("ihsg_ma200", 0)),
+                ma_label=regime.get("ma_label", "MA50"),
             )
             self._picks_cache = msg
             return msg
@@ -115,10 +115,10 @@ class PicksCog(commands.Cog):
         caution_prefix = ""
         if r == "CAUTION":
             last = regime.get("ihsg_last", 0)
-            ma200 = regime.get("ihsg_ma200", 0)
-            ma_label = regime.get("ma_label", "MA200")
+            ma200 = regime.get("ihsg_ma50", regime.get("ihsg_ma200", 0))
+            ma_label = regime.get("ma_label", "MA50")
             caution_prefix = (
-                f"🟡 **CAUTION MODE** — IHSG melemah di sekitar {ma_label}. "
+                f"**MODE WASPADA** — IHSG melemah di sekitar {ma_label}. "
                 f"({last:,.2f} vs {ma_label} {ma200:,.0f})\n"
                 "Kurangi ukuran posisi 50%, fokus ke setup paling clean, dan risk maksimal 1.5% per trade.\n\n"
             )
@@ -149,8 +149,17 @@ class PicksCog(commands.Cog):
         news_ctx = await self._build_news_context(candidates[:5])
 
         shortlist = build_quant_shortlist(candidates, regime=regime, max_candidates=12)
-        if not shortlist:
-            shortlist = candidates[:12]
+        eligible_shortlist = [item for item in shortlist if item.get("pick_eligible")]
+        if len(eligible_shortlist) < 3:
+            message = (
+                "**DAILY PICKS IDX**\n\n"
+                "Tidak ada minimal tiga setup yang memenuhi expected return positif, "
+                "R/R minimum 1:1.2, dan kualitas entry yang memadai hari ini.\n\n"
+                "Tidak ada saham yang dipaksakan masuk ke picks."
+            )
+            self._picks_cache = message
+            return message
+        shortlist = eligible_shortlist
 
         await self._notify_progress(progress, Msg.picks_ai())
         response = await loop.run_in_executor(
@@ -246,12 +255,12 @@ class PicksCog(commands.Cog):
 
         recent = ", ".join(stats.get("last_dates", [])[-3:]) or "-"
         return (
-            "📈 **PERFORMA DAILY PICKS — 30 HARI**\n"
+            "**PERFORMA DAILY PICKS — 30 HARI**\n"
             f"{_fmt('7D', ret7)}\n"
             f"{_fmt('14D', ret14)}\n"
             f"Total picks tercatat: **{stats.get('total_picks', 0)}**\n"
             f"Update terakhir: {recent}\n"
-            "⚠️ Hit-rate dihitung dari close aktual 7 dan 14 hari setelah picks."
+            "Catatan: hit-rate dihitung dari close aktual 7 dan 14 hari setelah picks."
         )
 
 

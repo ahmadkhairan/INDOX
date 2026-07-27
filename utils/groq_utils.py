@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from config import GROQ_API_KEY, GROQ_MODEL
+from config import AI_PROVIDERS, GROQ_API_KEY, GROQ_MODEL
 
 
 GROQ_KEY_PATTERN = re.compile(r"^(gsk|grq)_[A-Za-z0-9_-]{20,}$")
@@ -27,3 +27,13 @@ def groq_status(api_key: str | None = None, model: str | None = None) -> dict[st
         "status": "configured" if ok else "invalid",
         "message": message,
     }
+
+
+def validate_ai_config() -> tuple[bool, str]:
+    """Validate legacy Groq or the new multi-provider configuration."""
+    if AI_PROVIDERS:
+        valid = [p for p in AI_PROVIDERS if p.get("api_key") and p.get("model")]
+        if valid:
+            return True, f"{len(valid)} AI provider(s) configured"
+        return False, "AI_PROVIDERS tidak memiliki api_key/model yang valid"
+    return validate_groq_config()

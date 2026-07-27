@@ -78,13 +78,13 @@ def _build_market_overview(ihsg: dict, movers: dict, regime: dict | None = None)
     regime_line = ""
     if regime:
         r = regime.get("regime", "")
-        ma_label = regime.get("ma_label", "MA200")
+        ma_label = regime.get("ma_label", "MA50")
         if r == "BEAR":
-            regime_line = f"\n⚠️ **BEAR MARKET**: IHSG di bawah {ma_label} ({regime.get('ihsg_ma200', 0):,.0f})"
+            regime_line = f"\n⚠️ **BEAR MARKET**: IHSG di bawah {ma_label} ({regime.get('ihsg_ma50', regime.get('ihsg_ma200', 0)):,.0f})"
         elif r == "CAUTION":
-            regime_line = f"\n🟡 **CAUTION**: IHSG mendekati {ma_label} ({regime.get('ihsg_ma200', 0):,.0f})"
+            regime_line = f"\n🟡 **CAUTION**: IHSG mendekati {ma_label} ({regime.get('ihsg_ma50', regime.get('ihsg_ma200', 0)):,.0f})"
         else:
-            regime_line = f"\n✅ **BULL REGIME**: IHSG di atas {ma_label} ({regime.get('ihsg_ma200', 0):,.0f})"
+            regime_line = f"\n✅ **BULL REGIME**: IHSG di atas {ma_label} ({regime.get('ihsg_ma50', regime.get('ihsg_ma200', 0)):,.0f})"
 
     lines = [
         f"🏦 **IHSG OVERVIEW** — {datetime.now().strftime('%d %b %Y %H:%M WIB')}",
@@ -108,10 +108,10 @@ def _build_monthly_report(now: datetime, ihsg: dict, movers: dict, regime: dict 
     month = now.strftime("%B %Y")
     regime_note = ""
     if regime:
-        ma_label = regime.get("ma_label", "MA200")
+        ma_label = regime.get("ma_label", "MA50")
         regime_name = regime.get("regime")
         flag = "⚠️ BEAR" if regime_name == "BEAR" else "🟡 CAUTION" if regime_name == "CAUTION" else "✅ BULL"
-        regime_note = f"\nRegime: {flag} | IHSG {ma_label}: {regime.get('ihsg_ma200', 0):,.0f}"
+        regime_note = f"\nRegime: {flag} | IHSG {ma_label}: {regime.get('ihsg_ma50', regime.get('ihsg_ma200', 0)):,.0f}"
 
     lines = [
         f"📅 **MONTHLY REPORT IDX — {month}**",

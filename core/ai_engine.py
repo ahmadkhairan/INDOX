@@ -1,33 +1,21 @@
 from __future__ import annotations
 import asyncio, json
+import re
 from datetime import datetime
 from typing import Optional
-from groq import Groq
-from config import GROQ_API_KEY, GROQ_MODEL, GROQ_MAX_TOKENS, GROQ_TEMPERATURE
-from utils.groq_utils import validate_groq_config
+from config import GROQ_MAX_TOKENS, GROQ_TEMPERATURE
+from utils.llm_provider import chat_completion, configured_provider_count
 from utils.logger import get_logger
 from utils.news_utils import detect_special_news
+from utils.market_regime import get_coal_price
 
 log = get_logger("core.ai")
-_client: Optional[Groq] = None
-_client_error = "GROQ_API_KEY belum dikonfigurasi."
-_valid_groq, _groq_msg = validate_groq_config(api_key=GROQ_API_KEY, model=GROQ_MODEL)
-if _valid_groq:
-    try:
-        _client = Groq(api_key=GROQ_API_KEY)
-        _client_error = ""
-    except Exception as exc:
-        _client_error = f"Gagal inisialisasi Groq client: {exc}"
-        log.warning(_client_error)
-else:
-    _client_error = _groq_msg
-    if GROQ_API_KEY:
-        log.warning(f"Groq config invalid: {_groq_msg}")
+_client_error = "Belum ada AI provider yang dikonfigurasi."
 
 SYSTEM_PROMPT = """Kamu adalah Chief Investment Officer + Head of Technical Analysis di top-tier fund ekuitas Indonesia, spesialisasi IDX.
 
 FRAMEWORK ANALISIS 4-LAYER:
-Layer 1 — MACRO/REGIME: IHSG vs trend anchor (MA200/MA50), global risk appetite, sektor rotation
+Layer 1 — MACRO/REGIME: IHSG vs trend anchor MA50, global risk appetite, sektor rotation
 Layer 2 — FUNDAMENTAL: Quality screen sesuai threshold sektor
 Layer 3 — TECHNICAL: Multi-entry confluence (momentum, pullback, breakout, volume, S/R)
 Layer 4 — SENTIMENT/FLOW: News flow, IDX announcement, foreign flow, OBV
@@ -72,31 +60,20 @@ Data harus drive segalanya. Akhiri dengan disclaimer singkat.
 """
 
 async def _call_async(messages, system=None, max_tokens=None):
-    if not _client: return f"❌ {_client_error}"
     loop = asyncio.get_event_loop()
     def _sync():
-        return _client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[{"role":"system","content": system or SYSTEM_PROMPT}] + messages,
-            temperature=GROQ_TEMPERATURE, max_tokens=max_tokens or GROQ_MAX_TOKENS,
-        )
+        return chat_completion(messages, system or SYSTEM_PROMPT, max_tokens or GROQ_MAX_TOKENS, GROQ_TEMPERATURE)[0]
     try:
         r = await loop.run_in_executor(None, _sync)
-        return r.choices[0].message.content.strip()
+        return r.strip()
     except Exception as exc:
-        log.error(f"Groq error: {exc}"); return f"❌ Error Groq API: {exc}"
+        log.error(f"AI provider error: {exc}"); return f"❌ Error AI provider: {exc}"
 
 def _call_groq(messages, system=None, max_tokens=None):
-    if not _client: return f"❌ {_client_error}"
     try:
-        r = _client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[{"role":"system","content": system or SYSTEM_PROMPT}] + messages,
-            temperature=GROQ_TEMPERATURE, max_tokens=max_tokens or GROQ_MAX_TOKENS,
-        )
-        return r.choices[0].message.content.strip()
+        return chat_completion(messages, system or SYSTEM_PROMPT, max_tokens or GROQ_MAX_TOKENS, GROQ_TEMPERATURE)[0]
     except Exception as exc:
-        return f"❌ Error Groq API: {exc}"
+        return f"❌ Error AI provider: {exc}"
 
 async def analyze_ticker_v4(data, news, user_question="", rag_context="",
                              sentiment=None, var_result=None, regime=None):
@@ -193,9 +170,9 @@ BERIKAN:
 
 
 async def generate_daily_picks_v4(candidates, news_context, regime=None, coal_data=None, market_sentiment=None):
-    regime_blk = f"\n🌐 IHSG REGIME: {regime.get('regime','N/A')} | {regime.get('warning','')}\n" if regime else ""
-    coal_blk = f"\n🔥 COAL RALLY: {coal_data.get('label','N/A')}\n" if coal_data and coal_data.get("rally") else ""
-    sent_blk = (f"\n📰 MARKET SENTIMENT: {market_sentiment.get('label','NEUTRAL')} "
+    regime_blk = f"\nIHSG REGIME: {regime.get('regime','N/A')} | {regime.get('warning','')}\n" if regime else ""
+    coal_blk = f"\nCOAL RALLY: {coal_data.get('label','N/A')}\n" if coal_data and coal_data.get("rally") else ""
+    sent_blk = (f"\nMARKET SENTIMENT: {market_sentiment.get('label','NEUTRAL')} "
                 f"(score:{market_sentiment.get('score',0):+.3f} coverage:{market_sentiment.get('coverage',0)})\n"
                ) if market_sentiment else ""
 
@@ -205,14 +182,17 @@ async def generate_daily_picks_v4(candidates, news_context, regime=None, coal_da
         s=d.get("score",{}); sc=d.get("sector_context",{}); mkt=d.get("market",{})
         q=d.get("quant",{}); pos=d.get("position_sizing",{})
         labels=[]
-        if mkt.get("vol_ratio",0)>=2.0: labels.append("🔥 HOT VOL")
-        if fl.get("net_raw",0)>50000: labels.append("💸 FOREIGN RUSH")
-        if sc.get("label")=="Coal Mining" and coal_data and coal_data.get("rally"): labels.append("⛏️ COAL RALLY")
-        if f.get("dividend_yield",0)>=5.0: labels.append("💰 HIGH DIV")
+        if mkt.get("vol_ratio",0)>=2.0: labels.append("HOT VOL")
+        if fl.get("net_raw",0)>50000: labels.append("FOREIGN RUSH")
+        if sc.get("label")=="Coal Mining" and coal_data and coal_data.get("rally"): labels.append("COAL RALLY")
+        if f.get("dividend_yield",0)>=5.0: labels.append("HIGH DIV")
         summary.append({
             "ticker":d.get("ticker"),"company":d.get("company_name","")[:25],
             "sector":sc.get("label",d.get("sector","N/A")),"price":mkt.get("price",0),
             "quant_rank":q.get("rank"),"quant_score":q.get("score"),
+            "expected_return_pct":d.get("return_profile",{}).get("expected_return_pct",0),
+            "reward_pct":d.get("return_profile",{}).get("reward_pct",0),
+            "risk_pct":d.get("return_profile",{}).get("risk_pct",0),
             "score":s.get("total",0),"grade":s.get("grade","N/A"),
             "confidence":s.get("confidence","N/A"),"win_prob":s.get("win_probability",0),
             "entry_quality":s.get("entry_quality","N/A"),"five_cond":s.get("five_cond_count",0),
@@ -230,43 +210,45 @@ async def generate_daily_picks_v4(candidates, news_context, regime=None, coal_da
             "retail_band":pos.get("retail_band",""),
             "kelly_frac_pct":pos.get("kelly_fractional_pct",0),
             "labels":labels,
+            "scan_mode":"fallback" if d.get("scan_fallback") else "strict",
         })
 
     is_bear = regime and regime.get("regime")=="BEAR"
-    bear_note = "\n⚠️ BEAR MODE: Hanya score>75, size 50%, SL sangat ketat.\n" if is_bear else ""
+    bear_note = "\nBEAR MODE: Hanya score>75, size 50%, SL sangat ketat.\n" if is_bear else ""
 
+    fallback_note = "\nPERINGATAN: Shortlist menggunakan fallback karena tidak ada kandidat yang memenuhi seluruh filter strict. Pilih setup terbaik, tetapi tulis dengan jelas kondisi yang masih harus dikonfirmasi sebelum entry.\n" if any(d.get("scan_fallback") for d in candidates) else ""
     prompt = f"""Tanggal: {datetime.now().strftime("%d %B %Y")}
 {regime_blk}{coal_blk}{sent_blk}
+{fallback_note}
 DATA KANDIDAT (scan seluruh IDX liquid):
 {json.dumps(summary, indent=2, default=str)}
 
 BERITA: {news_context}
 {bear_note}
 Kamu hanya boleh memilih TEPAT 3 saham dari shortlist quant di atas.
-Prioritas: quant_rank terbaik, quant_score tinggi, entry_quality CLEAN/GOOD, signal_count >= 1, preferred_mode jelas, liquid, trend bullish, ADX >= 18, R/R sehat, flow tidak negatif.
-Jika regime CAUTION, prioritaskan quant_rank 1-6, setup paling clean, dan kecilkan size. Jangan pilih ticker di luar data input.
+Prioritas: expected_return_pct positif dan tertinggi, R/R sehat, quant_rank terbaik, quant_score tinggi, entry_quality CLEAN/GOOD, signal_count >= 1, preferred_mode jelas, liquid, trend bullish, ADX >= 18, flow tidak negatif. Jangan memilih kandidat jika expected_return_pct <= 0.
+Jika regime CAUTION, prioritaskan quant_rank 1-6, setup paling clean, dan kecilkan size. Jangan pilih ticker di luar data input. Gunakan bahasa profesional dan jangan gunakan emoji, ikon, simbol dekoratif, atau karakter grafis apa pun.
 
 FORMAT WAJIB:
 
-📊 **DAILY PICKS IDX — {datetime.now().strftime("%d %b %Y")} [v4]**
-{regime_blk}━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+**DAILY PICKS IDX — {datetime.now().strftime("%d %b %Y")} [v4]**
+{regime_blk}
 
-**🥇 PICK #1: [TICKER] — [Nama]**
-🏭 Sektor: [sektor] [labels]
+**PICK #1: [TICKER] — [Nama]**
+Sektor: [sektor] [labels]
 Score: __/100 Grade __ | RSI: __ | ADX: __ | Trend: __
-📐 Quant: Rank #__ | Quant Score __/100 | Mode: __ | Signals: __/3
-🎯 Entry: Rp____ – Rp____ | 🛡️ SL: Rp____ | 💰 TP1: Rp____ (+__%) TP2: Rp____ (+__%)
-⚖️ R/R: 1:__ | Risk/Trade: __% | 💼 Retail Size: __% (__)
-🔮 Conf: __ | Win Prob: __%
-💸 Flow: __ | 📌 Alasan: [2 kalimat spesifik — trigger + alasan pilih hari ini]
-✅ Konfirmasi: [kondisi HARUS terpenuhi sebelum entry]
+Quant: Rank #__ | Quant Score __/100 | Mode: __ | Signals: __/3
+Entry: Rp____ – Rp____ | SL: Rp____ | TP1: Rp____ (+__%) TP2: Rp____ (+__%)
+R/R: 1:__ | Risk/Trade: __% | Retail Size: __% (__)
+Confidence: __ | Win Prob: __%
+Flow: __ | Alasan: [2 kalimat spesifik — trigger + alasan pilih hari ini]
+Konfirmasi: [kondisi HARUS terpenuhi sebelum entry]
 
-**🥈 PICK #2** [format sama]
-**🥉 PICK #3** [format sama]
+**PICK #2** [format sama]
+**PICK #3** [format sama]
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💡 **MARKET PULSE**: [kondisi pasar + bias sektor]
-⚠️ *Analisis edukasi, bukan saran investasi.*"""
+**MARKET PULSE**: [kondisi pasar + bias sektor]
+*Analisis edukasi, bukan saran investasi.*"""
     return await _call_async([{"role":"user","content":prompt}], max_tokens=1800)
 
 
@@ -294,9 +276,54 @@ def analyze_ticker(data, news, user_question=""):
 def generate_daily_picks(candidates, news_context, regime=None, coal_data=None):
     return _run_async(generate_daily_picks_v4(candidates, news_context, regime, coal_data))
 
+CHAT_SYSTEM_PROMPT = """Kamu adalah asisten informasi pasar IDX. Jawab hanya berdasarkan informasi yang tersedia dalam percakapan.
+Jika data tidak cukup, pertanyaan ambigu, atau pengguna meminta rekomendasi saham tanpa ticker dan data analisis, jangan mengarang dan jangan memberi rekomendasi. Minta pengguna memakai !picks atau !analisis TICKER.
+Gunakan bahasa Indonesia yang profesional dan ringkas. Jangan gunakan emoji atau simbol dekoratif."""
+
+
+def _chat_route_guard(user_message: str) -> str | None:
+    """Handle factual market routes before the LLM can hallucinate."""
+    text = (user_message or "").strip()
+    lower = text.lower()
+    if len(text.split()) < 2:
+        return "Pertanyaan terlalu singkat. Jelaskan informasi yang ingin Anda ketahui, misalnya: harga coal, kondisi IHSG, atau analisis BBCA."
+
+    if any(term in lower for term in ("coal", "batubara", "batu bara")):
+        data = get_coal_price()
+        if not data.get("available") or data.get("price", 0) <= 0:
+            return "Data harga coal sedang tidak tersedia. Silakan coba lagi beberapa saat lagi."
+        stale = " (menggunakan cache terakhir)" if data.get("stale") else ""
+        return (
+            f"Harga coal saat ini: USD {data['price']:,.2f} per ton{stale}. "
+            f"Sumber: {data.get('source', 'provider pasar')}."
+        )
+
+    asks_recommendation = any(term in lower for term in (
+        "rekomendasi", "saham apa", "saham bagus", "beli saham", "buy", "target harga",
+        "entry", "take profit", "tp1", "tp2",
+    ))
+    ticker_match = re.search(r"\b[A-Z]{4}\b", text.upper())
+    if asks_recommendation and not ticker_match:
+        return (
+            "Informasi belum cukup untuk memberikan rekomendasi. "
+            "Gunakan `!picks` untuk shortlist harian atau `!analisis TICKER` "
+            "untuk analisis saham tertentu."
+        )
+
+    if ticker_match and any(term in lower for term in ("analisis", "analysis", "gimana", "bagaimana", "prospek")):
+        return (
+            f"Untuk analisis {ticker_match.group(0)}, gunakan `!analisis {ticker_match.group(0)}` "
+            "agar sistem mengambil data harga, teknikal, fundamental, dan risiko terbaru."
+        )
+    return None
+
+
 def chat(user_message, history=None):
+    guarded = _chat_route_guard(user_message)
+    if guarded:
+        return guarded
     msgs = list(history or []) + [{"role":"user","content":user_message}]
-    return _call_groq(msgs)
+    return _call_groq(msgs, system=CHAT_SYSTEM_PROMPT)
 
 def analyze_portfolio(holdings):
     total_inv = sum(h["qty"]*h["avg_price"] for h in holdings)
@@ -317,17 +344,30 @@ def analyze_backtest(ticker, results):
     if mc.get("median_return") is not None:
         mc_t = f"MC ({mc.get('n_simulations',0):,} sim): Median {mc['median_return']:+.2f}% P5 {mc.get('p5_return',0):+.2f}% P95 {mc.get('p95_return',0):+.2f}% ProbPos {mc.get('probability_positive',0):.1f}% Conf:{mc.get('confidence','N/A')}\n"
     entry_breakdown = results.get("entry_breakdown") or {}
-    prompt = f"""Backtest {ticker} ({results.get("period","?")}):
+    prompt = f"""Evaluasi singkat backtest {ticker} ({results.get("period","?")}):
 Trades:{results.get("total_trades",0)} WinRate:{results.get("win_rate",0):.1f}% PF:{results.get("profit_factor",0):.2f} Return:{results.get("total_return",0):.2f}% MaxDD:{results.get("max_drawdown",0):.2f}% Sharpe:{results.get("sharpe",0):.3f}
 Mode:{results.get("entry_mode","all")} | Regime:{results.get("regime_state","N/A")} | Risk/Trade:{results.get("risk_per_trade_pct",0):.2f}% | Kelly:{results.get("kelly_fraction_pct",0):.2f}%
 Entries: Momentum {entry_breakdown.get("MOMENTUM",0)} Pullback {entry_breakdown.get("PULLBACK",0)} Breakout {entry_breakdown.get("BREAKOUT",0)}
 {mc_t}
-    Evaluasi: 1.Layak live trading? 2.Apakah multi-entry dan dynamic exit sudah seimbang? 3.Saran perbaikan parameter 4.Red flags dari MC tail risk"""
+    Aturan:
+    - Jawab dalam bahasa Indonesia profesional, maksimal 12 baris.
+    - Jangan gunakan emoji atau simbol dekoratif.
+    - Jika total trades < 30, sebutkan bahwa sampel historis terbatas dan confidence rendah.
+    - Jangan menyimpulkan dynamic exit bekerja atau tidak jika tidak ada metrik exit yang diberikan.
+    - Jangan menyebut multi-entry rusak hanya karena satu mode entry dominan; jelaskan bahwa mode lain tidak aktif pada periode tersebut.
+    - Jangan memberi rekomendasi live trading jika return negatif, profit factor < 1, atau Sharpe negatif.
+
+    Format wajib:
+    Status: Layak / Belum layak live trading — satu alasan utama.
+    Sampel: jumlah trade dan dampaknya pada confidence.
+    Entry dan exit: observasi yang benar-benar didukung data; tulis "data tidak tersedia" jika perlu.
+    Risiko Monte Carlo: median, probabilitas positif, dan P5 secara ringkas.
+    Tindakan: maksimal tiga perbaikan yang paling relevan."""
     return _call_groq([{"role":"user","content":prompt}], max_tokens=900)
 
 def get_groq_status() -> dict[str, str | bool]:
     return {
-        "configured": _client is not None,
-        "status": "configured" if _client is not None else "invalid",
-        "message": "ok" if _client is not None else _client_error,
+        "configured": configured_provider_count() > 0,
+        "status": "configured" if configured_provider_count() > 0 else "invalid",
+        "message": f"{configured_provider_count()} provider(s) configured" if configured_provider_count() > 0 else _client_error,
     }

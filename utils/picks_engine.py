@@ -14,15 +14,16 @@ RETAIL_POSITION_CAP = {
 }
 
 QUANT_WEIGHTS = {
-    "base_score": 0.30,
-    "technical": 0.18,
-    "flow": 0.12,
+    "base_score": 0.23,
+    "technical": 0.16,
+    "flow": 0.10,
     "rr": 0.10,
-    "volume": 0.08,
-    "adx": 0.06,
-    "rsi": 0.04,
-    "liquidity": 0.04,
+    "volume": 0.07,
+    "adx": 0.05,
+    "rsi": 0.03,
+    "liquidity": 0.03,
     "signals": 0.08,
+    "expected_return": 0.15,
 }
 
 
@@ -41,6 +42,26 @@ def _norm_ratio(value: float, lo: float, hi: float) -> float:
     if hi <= lo:
         return 0.0
     return _clamp((value - lo) / (hi - lo), 0.0, 1.0) * 100.0
+
+
+def _return_profile(candidate: dict) -> tuple[float, float, float]:
+    """Calculate expected return, reward and risk percentages for a setup."""
+    score = candidate.get("score", {})
+    tech = candidate.get("technical", {})
+    market = candidate.get("market", {})
+    price = _safe_num(market.get("price", tech.get("last_close", 0)))
+    sl = _safe_num(tech.get("aggressive_sl", tech.get("atr_sl", 0)))
+    tp1 = _safe_num(tech.get("aggressive_tp1", tech.get("atr_tp1", 0)))
+    tp2 = _safe_num(tech.get("aggressive_tp2", tech.get("atr_tp2", 0)))
+    if price <= 0 or sl <= 0 or tp1 <= price:
+        return 0.0, 0.0, 0.0
+    risk = max((price - sl) / price * 100.0, 0.1)
+    reward1 = max((tp1 - price) / price * 100.0, 0.0)
+    reward2 = max((tp2 - price) / price * 100.0, reward1)
+    reward = reward1 * 0.6 + reward2 * 0.4
+    win_prob = _clamp(_safe_num(score.get("win_probability", 45.0)), 25.0, 85.0) / 100.0
+    expected = win_prob * reward - (1.0 - win_prob) * risk
+    return round(expected, 2), round(reward, 2), round(risk, 2)
 
 
 def _rsi_score(rsi: float) -> float:
@@ -148,6 +169,8 @@ def build_quant_shortlist(
         rsi_score = _rsi_score(_safe_num(tech.get("rsi", 50)))
         liquidity_score = 100.0 if candidate.get("liquid") else 25.0
         signal_score = _norm_ratio(_safe_num(score.get("aggressive_signal_count", tech.get("aggressive_signal_count", 0))), 1.0, 3.0)
+        expected_return, reward_pct, risk_pct = _return_profile(candidate)
+        expected_score = _norm_ratio(expected_return, 0.0, 10.0)
 
         quant_score = (
             base_score * QUANT_WEIGHTS["base_score"] +
@@ -158,7 +181,8 @@ def build_quant_shortlist(
             adx_score * QUANT_WEIGHTS["adx"] +
             rsi_score * QUANT_WEIGHTS["rsi"] +
             liquidity_score * QUANT_WEIGHTS["liquidity"] +
-            signal_score * QUANT_WEIGHTS["signals"]
+            signal_score * QUANT_WEIGHTS["signals"] +
+            expected_score * QUANT_WEIGHTS["expected_return"]
         )
 
         quant_score += _trend_bonus(candidate)
@@ -166,6 +190,14 @@ def build_quant_shortlist(
         five_cond = int(score.get("five_cond_count", 0))
         signal_count = int(score.get("aggressive_signal_count", tech.get("aggressive_signal_count", 0)))
         preferred_mode = str(score.get("preferred_entry_mode", tech.get("preferred_entry_mode", "WAIT"))).upper()
+        entry_quality = str(score.get("entry_quality", "WEAK")).upper()
+        rr = _safe_num(tech.get("atr_rr", 0))
+        pick_eligible = bool(
+            signal_count >= 1
+            and entry_quality in {"CLEAN", "GOOD"}
+            and rr >= 1.2
+            and expected_return > 0
+        )
         if signal_count >= 2:
             quant_score += 4.0
         elif signal_count < 1 and five_cond < 3:
@@ -186,6 +218,12 @@ def build_quant_shortlist(
             quant_score -= 10.0
 
         candidate_copy = dict(candidate)
+        candidate_copy["pick_eligible"] = pick_eligible
+        candidate_copy["return_profile"] = {
+            "expected_return_pct": expected_return,
+            "reward_pct": reward_pct,
+            "risk_pct": risk_pct,
+        }
         candidate_copy["position_sizing"] = estimate_position_size(candidate, regime)
         candidate_copy["quant"] = {
             "score": round(_clamp(quant_score, 0.0, 100.0), 1),

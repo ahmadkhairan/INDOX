@@ -1,6 +1,7 @@
 # config.py — IDX Analyst Bot v4 (No ML)
 from __future__ import annotations
 import os
+import json
 from typing import Final
 from dotenv import load_dotenv
 
@@ -21,6 +22,28 @@ def _split_int_csv_env(name: str) -> tuple[int, ...]:
             continue
     return tuple(values)
 
+
+def _load_ai_providers() -> tuple[dict, ...]:
+    raw = os.getenv("AI_PROVIDERS", "").strip()
+    if not raw:
+        return ()
+    try:
+        items = json.loads(raw)
+        if not isinstance(items, list):
+            return ()
+        result = []
+        for item in items:
+            if not isinstance(item, dict) or item.get("enabled", True) is False:
+                continue
+            provider = dict(item)
+            key_env = provider.pop("api_key_env", "")
+            if key_env:
+                provider["api_key"] = os.getenv(key_env, "")
+            result.append(provider)
+        return tuple(result)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ()
+
 DISCORD_TOKEN: Final[str]    = os.getenv("DISCORD_TOKEN", "")
 DAILY_CHANNEL_ID: Final[int] = int(os.getenv("DAILY_CHANNEL_ID", "0"))
 ALERT_CHANNEL_ID: Final[int] = int(os.getenv("ALERT_CHANNEL_ID", os.getenv("DAILY_CHANNEL_ID", "0")))
@@ -30,6 +53,7 @@ GROQ_MODEL: Final[str]         = "llama-3.3-70b-versatile"
 GROQ_MODEL_FAST: Final[str]    = "llama-3.1-8b-instant"
 GROQ_MAX_TOKENS: Final[int]    = 3000
 GROQ_TEMPERATURE: Final[float] = 0.20
+AI_PROVIDERS: Final[tuple[dict, ...]] = _load_ai_providers()
 
 SECTORS_API_KEY: Final[str] = os.getenv("SECTORS_API_KEY", "")
 SECTORS_BASE: Final[str]    = "https://api.sectors.app/v1"
@@ -92,10 +116,10 @@ NEWS_RSS_FEEDS: Final[list[str]] = [
     "https://investasi.kontan.co.id/rss/news",
 ]
 
-WF_IN_SAMPLE_MONTHS: Final[int]  = 4
-WF_OUT_SAMPLE_MONTHS: Final[int] = 2
-WF_STEP_MONTHS: Final[int]       = 1
-MC_SIMULATIONS: Final[int]       = 8000
+WF_IN_SAMPLE_MONTHS: Final[int]  = 12
+WF_OUT_SAMPLE_MONTHS: Final[int] = 3
+WF_STEP_MONTHS: Final[int]       = 3
+MC_SIMULATIONS: Final[int]       = 50000
 MC_BOOTSTRAP_BLOCK: Final[int]   = 10
 
 DEFAULT_WATCHLIST: Final[list[str]] = [
@@ -109,7 +133,7 @@ SCORE_WEIGHTS: Final[dict[str, float]] = {
     "fundamental": 0.35, "technical": 0.30, "flow": 0.20, "sentiment": 0.15,
 }
 
-MIN_MARKET_CAP_T: Final[float]  = 5.0
+MIN_MARKET_CAP_T: Final[float]  = 1.0
 MIN_DAILY_VALUE_B: Final[float] = 10.0
 
 FUNDAMENTAL_GOOD: Final[dict[str, float]] = {

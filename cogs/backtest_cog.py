@@ -14,7 +14,7 @@ class BacktestCog(commands.Cog, name="Backtest v4"):
 
     @commands.command(name="backtest", aliases=["bt"])
     @commands.cooldown(*BACKTEST_COOLDOWN, commands.BucketType.user)
-    async def bt_cmd(self, ctx, ticker: str = None, bulan: str = "3"):
+    async def bt_cmd(self, ctx, ticker: str = None, bulan: str = "12"):
         """!backtest BBCA [bulan] — Backtest ATR dynamic + Monte Carlo"""
         if not ticker:
             await ctx.reply("❌ Format: `!backtest TICKER [BULAN]`\nContoh: `!backtest BBCA 3`"); return
@@ -23,8 +23,8 @@ class BacktestCog(commands.Cog, name="Backtest v4"):
         except ValueError as exc:
             await ctx.reply(f"❌ {exc}")
             return
-        try: months = max(1, min(int(bulan), 12))
-        except: months = 3
+        try: months = max(6, min(int(bulan), 36))
+        except: months = 12
         msg = await ctx.reply(f"⚙️ Backtesting **{ticker}** ({months} bulan) + Monte Carlo...")
         try:
             from backtest.engine_backtest import run_backtest_v4
@@ -68,16 +68,16 @@ class BacktestCog(commands.Cog, name="Backtest v4"):
         except Exception as exc: await msg.edit(content=f"❌ {user_error_message(exc)}")
 
     @app_commands.command(name="backtest", description="Backtest ATR dynamic + Monte Carlo")
-    @app_commands.describe(ticker="Kode saham IDX", bulan="Periode backtest 1-12 bulan")
+    @app_commands.describe(ticker="Kode saham IDX", bulan="Periode backtest 6-36 bulan")
     @app_commands.checks.cooldown(*BACKTEST_COOLDOWN)
-    async def slash_backtest(self, interaction: discord.Interaction, ticker: str, bulan: int = 3):
+    async def slash_backtest(self, interaction: discord.Interaction, ticker: str, bulan: int = 12):
         await interaction.response.defer(thinking=True)
         try:
             ticker = normalize_ticker(ticker)
         except ValueError as exc:
             await interaction.followup.send(f"❌ {exc}", ephemeral=True)
             return
-        months = max(1, min(bulan, 12))
+        months = max(6, min(bulan, 36))
         await interaction.edit_original_response(content=f"⚙️ Mengambil data historis & menjalankan backtest **{ticker}**...")
         try:
             from backtest.engine_backtest import run_backtest_v4
@@ -136,7 +136,7 @@ class BacktestCog(commands.Cog, name="Backtest v4"):
 
     @commands.command(name="montecarlo", aliases=["mc"])
     @commands.cooldown(*BACKTEST_COOLDOWN, commands.BucketType.user)
-    async def mc_cmd(self, ctx, ticker: str = None, months: str = "6"):
+    async def mc_cmd(self, ctx, ticker: str = None, months: str = "24"):
         """!montecarlo BBCA [months] — Monte Carlo return distribution"""
         if not ticker: await ctx.reply("❌ Contoh: `!montecarlo BBCA 6`"); return
         try:
@@ -144,8 +144,8 @@ class BacktestCog(commands.Cog, name="Backtest v4"):
         except ValueError as exc:
             await ctx.reply(f"❌ {exc}")
             return
-        try: mo = max(3, min(int(months), 24))
-        except: mo = 6
+        try: mo = max(12, min(int(months), 60))
+        except: mo = 24
         msg = await ctx.reply(f"🎲 Monte Carlo **{ticker}** ({mo} bulan data)...")
         try:
             from backtest.engine_backtest import SingleBT, MonteCarloEngine
@@ -161,35 +161,21 @@ class BacktestCog(commands.Cog, name="Backtest v4"):
                 await msg.edit(content=f"⚠️ Tidak ada trade dalam {mo} bulan untuk {ticker}.\nCoba perpanjang periode."); return
             await msg.edit(content=f"🎲 Menjalankan {MC_SIMULATIONS:,} simulasi Monte Carlo untuk **{ticker}**...")
             mcr = await MonteCarloEngine().run(res.trades)
-            color = (discord.Color.green() if mcr.prob_positive>65 else
-                     discord.Color.gold() if mcr.prob_positive>45 else discord.Color.red())
-            emb = discord.Embed(title=f"🎲 Monte Carlo — {ticker} ({mcr.n_sim:,} sim)",
-                                description=f"Confidence: **{mcr.confidence}** | Dari {res.total_trades} trades historis", color=color)
-            emb.add_field(name="📊 Return Distribution",
-                value=f"P5   : {mcr.p5:+.2f}% (worst)\nP25  : {mcr.p25:+.2f}%\nMedian: **{mcr.median:+.2f}%**\nP75  : {mcr.p75:+.2f}%\nP95  : {mcr.p95:+.2f}% (best)", inline=True)
-            emb.add_field(name="🎯 Probabilitas",
-                value=f"Return>0%  : **{mcr.prob_positive:.1f}%**\nReturn>10% : **{mcr.prob_above_10:.1f}%**\nSharpe median: **{mcr.sharpe_median:.3f}**", inline=True)
-            emb.add_field(name="📉 Drawdown Risk",
-                value=f"Max DD median: {mcr.mdd_median:.2f}%\nMax DD P95   : **{mcr.mdd_p95:.2f}%**", inline=True)
-            interp = ("✅ Distribusi favorabel" if mcr.prob_positive>65 and mcr.mdd_p95>-20
-                      else "🟡 Borderline — perhatikan drawdown" if mcr.prob_positive>50
-                      else "⚠️ Probability negatif tinggi — optimasi strategi dulu")
-            emb.add_field(name="💡 Assessment", value=interp, inline=False)
-            emb.set_footer(text=f"Block bootstrap adaptif ({mcr.block_size}) | adaptive risk sizing | IDX Bot v4")
+            emb = self._build_mc_embed(ticker, res.total_trades, mcr)
             await msg.edit(content=None, embed=emb)
         except Exception as exc: await msg.edit(content=f"❌ {user_error_message(exc)}")
 
     @app_commands.command(name="montecarlo", description="Monte Carlo distribution dari trade historis")
-    @app_commands.describe(ticker="Kode saham IDX", months="Lookback 3-24 bulan")
+    @app_commands.describe(ticker="Kode saham IDX", months="Lookback 12-60 bulan")
     @app_commands.checks.cooldown(*BACKTEST_COOLDOWN)
-    async def slash_montecarlo(self, interaction: discord.Interaction, ticker: str, months: int = 6):
+    async def slash_montecarlo(self, interaction: discord.Interaction, ticker: str, months: int = 24):
         await interaction.response.defer(thinking=True)
         try:
             ticker = normalize_ticker(ticker)
         except ValueError as exc:
             await interaction.followup.send(f"❌ {exc}", ephemeral=True)
             return
-        mo = max(3, min(months, 24))
+        mo = max(12, min(months, 60))
         try:
             from backtest.engine_backtest import SingleBT, MonteCarloEngine
             from datetime import datetime, timedelta
@@ -307,33 +293,39 @@ class BacktestCog(commands.Cog, name="Backtest v4"):
         return f"{first}-{last}"
 
     def _build_mc_embed(self, ticker: str, total_trades: int, mcr) -> discord.Embed:
-        color = (discord.Color.green() if mcr.prob_positive > 65 else
-                 discord.Color.gold() if mcr.prob_positive > 45 else discord.Color.red())
+        color = discord.Color.green() if mcr.prob_positive > 65 else discord.Color.orange() if mcr.prob_positive > 45 else discord.Color.red()
+        if total_trades < 30:
+            conclusion = "Sampel historis masih terbatas. Hasil belum cukup untuk validasi strategi."
+        elif mcr.prob_positive > 65 and mcr.mdd_p5 > -20:
+            conclusion = "Distribusi simulasi mendukung strategi, tetapi tetap perlu validasi out-of-sample."
+        elif mcr.prob_positive > 50:
+            conclusion = "Hasil borderline. Strategi memerlukan pengujian dan perbaikan tambahan."
+        else:
+            conclusion = "Distribusi cenderung negatif. Strategi belum layak digunakan live."
         emb = discord.Embed(
-            title=f"🎲 Monte Carlo — {ticker} ({mcr.n_sim:,} sim)",
-            description=f"Confidence: **{mcr.confidence}** | Dari {total_trades} trades historis",
+            title=f"Monte Carlo: {ticker}",
+            description=(f"Tujuan: menguji seberapa konsisten hasil strategi jika urutan trade historis berubah.\n"
+                         f"Confidence: **{mcr.confidence}** | Simulasi: {mcr.n_sim:,} | Trade historis: {total_trades}"),
             color=color,
         )
         emb.add_field(
-            name="📊 Return Distribution",
-            value=f"P5   : {mcr.p5:+.2f}% (worst)\nP25  : {mcr.p25:+.2f}%\nMedian: **{mcr.median:+.2f}%**\nP75  : {mcr.p75:+.2f}%\nP95  : {mcr.p95:+.2f}% (best)",
+            name="Kesimpulan",
+            value=conclusion,
+            inline=False,
+        )
+        emb.add_field(
+            name="Angka Utama",
+            value=(f"Median return: **{mcr.median:+.2f}%**\n"
+                   f"Probabilitas positif: **{mcr.prob_positive:.1f}%**\n"
+                   f"Drawdown terburuk P5: **{mcr.mdd_p5:.2f}%**"),
             inline=True,
         )
         emb.add_field(
-            name="🎯 Probabilitas",
-            value=f"Return>0%  : **{mcr.prob_positive:.1f}%**\nReturn>10% : **{mcr.prob_above_10:.1f}%**\nSharpe median: **{mcr.sharpe_median:.3f}**",
+            name="Tujuan Penggunaan",
+            value="Gunakan untuk mengukur risiko dan konsistensi, bukan untuk memprediksi return pasti.",
             inline=True,
         )
-        emb.add_field(
-            name="📉 Drawdown Risk",
-            value=f"Max DD median: {mcr.mdd_median:.2f}%\nMax DD P95   : **{mcr.mdd_p95:.2f}%**",
-            inline=True,
-        )
-        interp = ("✅ Distribusi favorabel" if mcr.prob_positive > 65 and mcr.mdd_p95 > -20
-                  else "🟡 Borderline — perhatikan drawdown" if mcr.prob_positive > 50
-                  else "⚠️ Probability negatif tinggi — optimasi strategi dulu")
-        emb.add_field(name="💡 Assessment", value=interp, inline=False)
-        emb.set_footer(text=f"Block bootstrap adaptif ({mcr.block_size}) | adaptive risk sizing | IDX Bot v4")
+        emb.set_footer(text="Monte Carlo adalah validasi risiko, bukan jaminan performa masa depan.")
         return emb
 
     async def _send_slash_long(self, interaction: discord.Interaction, content: str) -> None:

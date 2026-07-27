@@ -35,7 +35,7 @@ An AI and quantitative research assistant for the **Indonesian Stock Exchange (I
 
 `bot.py` is the sole entry point. On startup it:
 
-1. Validates required secrets (`DISCORD_TOKEN`, `GROQ_API_KEY`, `API_SECRET` in production).
+1. Validates required secrets (`DISCORD_TOKEN`, one AI provider, and `API_SECRET` in production).
 2. Initializes shared infrastructure (cache, optional vector memory).
 3. Spawns concurrent asyncio tasks:
    - **FastAPI** (uvicorn) on `API_HOST:API_PORT`
@@ -251,7 +251,8 @@ Copy `env.example` to `.env`:
 | Variable | Required | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `DISCORD_TOKEN` | **Yes** | — | Discord bot token |
-| `GROQ_API_KEY` | **Yes** | — | Groq Cloud API key |
+| `GROQ_API_KEY` | No* | — | Legacy Groq Cloud API key; use `AI_PROVIDERS` for multiple providers |
+| `AI_PROVIDERS` | No | — | Ordered JSON provider list with automatic failover (OpenAI-compatible or Anthropic) |
 | `DAILY_CHANNEL_ID` | **Yes** | `0` | Channel for automated daily picks |
 | `API_SECRET` | Prod | — | REST API key (`X-API-Key` header) |
 | `SECTORS_API_KEY` | No | — | Sectors.app API for IDX fundamentals |
@@ -276,7 +277,7 @@ Copy `env.example` to `.env`:
 git clone <repository_url>
 cd INDOX
 python -m venv .venv && source .venv/bin/activate
-cp env.example .env   # fill in DISCORD_TOKEN, GROQ_API_KEY, API_SECRET
+cp env.example .env   # fill in DISCORD_TOKEN, an AI provider, and API_SECRET
 pip install -r requirements.txt
 python bot.py
 ```

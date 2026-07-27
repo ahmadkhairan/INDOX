@@ -15,6 +15,7 @@ ENV/
 .env
 
 # Bot persistent data
+data/
 data/alerts.json
 data/daily_picks_history.json
 data/picks_cache_date.json

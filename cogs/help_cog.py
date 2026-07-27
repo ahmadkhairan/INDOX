@@ -16,9 +16,9 @@ class HelpCog(commands.Cog):
     async def cmd_watchlist(self, ctx):
         tickers = " | ".join(DEFAULT_WATCHLIST)
         await ctx.reply(
-            f"📋 **Watchlist Default ({len(DEFAULT_WATCHLIST)} saham):**\n"
+            f"**Watchlist Default ({len(DEFAULT_WATCHLIST)} saham):**\n"
             f"`{tickers}`\n\n"
-            f"💡 Untuk scan **seluruh IDX**: gunakan `!picks` (otomatis scan semua saham liquid IDX)\n"
+            f"Untuk scan **seluruh IDX**: gunakan `!picks` (otomatis scan semua saham liquid IDX)\n"
             f"Gunakan `!analisis TICKER` untuk analisis mendalam."
         )
 
@@ -27,17 +27,17 @@ class HelpCog(commands.Cog):
         chat_cog = self.bot.get_cog("ChatCog")
         if chat_cog is not None:
             chat_cog.reset_history(ctx.author.id)
-        await ctx.reply("✅ History chat kamu sudah direset.")
+        await ctx.reply("History chat kamu sudah direset.")
 
     @commands.command(name="bantuan", aliases=["h", "help_saham"])
     async def cmd_bantuan(self, ctx):
         embed = discord.Embed(
-            title="📊 IDX Analyst Bot v4 — Panduan",
+            title="IDX Analyst Bot v4 — Panduan",
             color=discord.Color.blue(),
             timestamp=datetime.now(),
         )
         embed.add_field(
-            name="🎯 Commands Utama",
+            name="Commands Utama",
             value=(
                 "`!analisis TICKER` — Analisis lengkap 1 saham (AI Groq)\n"
                 "`!picks` — Daily top picks dari **scan seluruh IDX liquid**\n"
@@ -55,40 +55,40 @@ class HelpCog(commands.Cog):
             inline=False,
         )
         embed.add_field(
-            name="🆕 Upgrade v4",
+            name="Fitur Utama",
             value=(
-                "• **Scan seluruh IDX** di `!picks` (bukan hanya watchlist)\n"
-                "• **IHSG Regime Filter**: auto pause pick saat bear market\n"
-                "• **Buyback/Dividen Detection** dari berita terkini\n"
-                "• **Backtest v4** dengan multi-entry, dynamic exit, adaptive risk, + Monte Carlo\n"
-                "• **Walk-Forward Test** untuk cek robustness strategi\n"
-                "• **Risk Engine & Optimizer** untuk analisis portfolio\n"
-                "• **FastAPI** untuk akses fitur via endpoint"
+                "1. **Scan seluruh IDX** di `!picks` (bukan hanya watchlist)\n"
+                "2. **IHSG Regime Filter** untuk menghentikan pick saat bear market\n"
+                "3. Deteksi buyback dan dividen dari berita terkini\n"
+                "4. Backtest v4 dengan multi-entry, dynamic exit, adaptive risk, dan Monte Carlo\n"
+                "5. Walk-forward test untuk memeriksa robustness strategi\n"
+                "6. Risk engine dan optimizer untuk analisis portfolio\n"
+                "7. FastAPI untuk akses fitur melalui endpoint"
             ),
             inline=False,
         )
         embed.add_field(
-            name="⚙️ Scoring Model",
+            name="Scoring Model",
             value=(
                 "Setiap saham mendapat **score 0-100** berdasarkan:\n"
-                "• Fundamental: 40% _(threshold menyesuaikan sektor)_\n"
-                "• Teknikal: 30% _(momentum + pullback + breakout)_\n"
-                "• Flow: 20% _(mining mendapat bobot ekstra)_\n"
-                "• Bonus: coal rally, signal stack, dan quality setup"
+                "1. Fundamental: 40% _(threshold menyesuaikan sektor)_\n"
+                "2. Teknikal: 30% _(momentum, pullback, dan breakout)_\n"
+                "3. Flow: 20% _(mining mendapat bobot ekstra)_\n"
+                "4. Bonus: coal rally, signal stack, dan quality setup"
             ),
             inline=False,
         )
         embed.add_field(
-            name="🏷️ Label Picks",
+            name="Label Picks",
             value=(
-                "🔥 HOT VOLUME — volume ratio ≥ 2x\n"
-                "💸 FOREIGN RUSH — net buy asing besar\n"
-                "⛏️ COAL RALLY — batubara > $90/ton\n"
-                "💰 HIGH DIV — dividend yield ≥ 5%"
+                "HOT VOLUME — volume ratio ≥ 2x\n"
+                "FOREIGN RUSH — net buy asing besar\n"
+                "COAL RALLY — batubara > $90/ton\n"
+                "HIGH DIV — dividend yield ≥ 5%"
             ),
             inline=False,
         )
-        embed.set_footer(text="⚠️ Bukan saran investasi | IDX Analyst Bot v4")
+        embed.set_footer(text="Bukan saran investasi | IDX Analyst Bot v4")
         await ctx.send(embed=embed)
 
 

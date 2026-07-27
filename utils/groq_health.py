@@ -48,7 +48,7 @@ async def _probe_groq() -> tuple[bool, str]:
             )
 
         resp = await loop.run_in_executor(None, _sync_call)
-        _ = resp.choices[0].message.content  # ensure we can read the response
+        _ = resp.choices[0].message.content
         return True, "ok"
     except Exception as exc:
         return False, str(exc)

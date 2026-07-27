@@ -34,7 +34,7 @@ from utils.ticker_utils import normalize_ticker
 
 def run_backtest(
     ticker: str,
-    months: int = 3,
+    months: int = 12,
     sl_mult: float = 2.0,
     tp_mult: float = 3.0,
     use_regime_filter: bool = True,

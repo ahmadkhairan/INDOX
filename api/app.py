@@ -174,12 +174,13 @@ async def optimize(req: OptReq, _: bool = Depends(auth)):
     except Exception as exc: raise HTTPException(500, user_error_message(exc))
 
 @api_v4.get("/backtest/{ticker}")
-async def backtest(ticker: str, months: int = 3, walk_forward: bool = False, _: bool = Depends(auth)):
+async def backtest(ticker: str, months: int = 12, walk_forward: bool = False, _: bool = Depends(auth)):
     try:
         ticker = normalize_ticker(ticker)
         if walk_forward:
             from backtest.engine_backtest import get_wf_engine
-            res = await get_wf_engine().run(ticker)
+            wf_years = max(1, min(months // 12 or 2, 5))
+            res = await get_wf_engine().run(ticker, years=wf_years)
             return {"ticker":res.ticker,"is_robust":res.is_robust,"robustness":res.robustness,
                     "oos":{"trades":res.oos_agg.total_trades,"win_rate":res.oos_agg.win_rate,
                            "pf":res.oos_agg.pf,"return":res.oos_agg.total_return,"sharpe":res.oos_agg.sharpe},

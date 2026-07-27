@@ -11,7 +11,7 @@ from config import (
 )
 from utils.command_limits import format_retry_after
 from utils.error_utils import user_error_message
-from utils.groq_utils import validate_groq_config
+from utils.groq_utils import validate_ai_config
 from utils.logger import get_logger
 log = get_logger("bot")
 
@@ -29,7 +29,7 @@ ON_READY_BANNER = """
 def validate_config():
     errs = []
     if not DISCORD_TOKEN: errs.append("DISCORD_TOKEN belum diisi")
-    ok_groq, groq_msg = validate_groq_config(api_key=GROQ_API_KEY)
+    ok_groq, groq_msg = validate_ai_config()
     if not ok_groq:
         errs.append(groq_msg)
     if ENV == "production" and (not API_SECRET or API_SECRET.lower() == "changeme"):

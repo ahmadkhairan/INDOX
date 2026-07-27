@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 import aiohttp
-from config import NEWS_RSS_FEEDS, GROQ_API_KEY, GROQ_MODEL_FAST, FEATURE_SENTIMENT_PIPELINE
+from config import NEWS_RSS_FEEDS, FEATURE_SENTIMENT_PIPELINE
 from utils.logger import get_logger
 log = get_logger("sentiment")
 
@@ -140,20 +140,19 @@ class SentimentPipeline:
         return scored
 
     async def _ai_score(self, items):
-        if not GROQ_API_KEY or not items: return []
+        if not items: return []
         batch = items[:12]
         titles = "\n".join(f"{i+1}. {it.get('title','')}" for i, it in enumerate(batch))
         prompt = f"Scoring sentimen berita saham IDX. Skala -1.0 sampai +1.0.\nJawab hanya angka per baris, tanpa teks lain.\n\nBerita:\n{titles}"
         try:
-            from groq import Groq
-            c = Groq(api_key=GROQ_API_KEY)
-            resp = c.chat.completions.create(
-                model=GROQ_MODEL_FAST,
-                messages=[{"role":"user","content":prompt}],
-                temperature=0.1, max_tokens=80,
+            from utils.llm_provider import chat_completion
+            text, _provider = chat_completion(
+                [{"role":"user","content":prompt}],
+                "Kamu adalah mesin scoring sentimen. Jawab hanya angka per baris.",
+                80, 0.1,
             )
             out = []
-            for line in resp.choices[0].message.content.strip().split("\n"):
+            for line in text.strip().split("\n"):
                 try:
                     v = max(-1.0, min(1.0, float(line.strip())))
                     lbl = "VERY_POS" if v>0.5 else "POS" if v>0.1 else "VERY_NEG" if v<-0.5 else "NEG" if v<-0.1 else "NEUTRAL"
