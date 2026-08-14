@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import time
 from datetime import datetime
 from typing import Optional
@@ -7,6 +9,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import requests
+from bs4 import BeautifulSoup
 
 from config import (
     MIN_ADX_ENTRY,
@@ -18,12 +21,31 @@ from config import (
     SECTORS_BASE,
 )
 from utils.fundamental_utils import normalize_der
+from utils.idx_api import get_idx_source
+from utils.logger import get_logger
 from utils.market_regime import get_coal_price
 from utils.runtime_cache import TTLCache
 from utils.scoring_rules import compute_score
 from utils.sector_data import get_sector_context
 from utils.ticker_utils import normalize_ticker
 from utils.yf_guard import YFinanceUnavailable, get_history, get_info, get_institutional_holders
+
+log = get_logger("stock_service")
+
+
+def _run_async(coro):
+    """Safely run an async coroutine from synchronous code."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(asyncio.run, coro).result(timeout=25)
+    else:
+        return asyncio.run(coro)
+
 
 
 _sess = requests.Session()
@@ -594,26 +616,132 @@ def _get_yfinance_data(ticker: str) -> dict:
         return {"error": f"Gagal fetch {ticker}: {str(exc)}"}
 
 
+def get_price_googlefinance(ticker: str) -> Optional[dict]:
+    """Fallback scraping Google Finance HTML for price & change_pct."""
+    url = f"https://www.google.com/finance/quote/{ticker.upper()}:IDX"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=8)
+        if resp.status_code != 200:
+            return None
+        soup = BeautifulSoup(resp.text, "html.parser")
+        price_elem = soup.find("div", {"class": "YMlA4e"}) or soup.find("div", {"class": "fxH1fe"})
+        if not price_elem:
+            return None
+        price_text = price_elem.text.replace("IDR", "").replace(",", "").strip()
+        price = float(price_text)
+
+        change_elem = soup.find("div", {"class": "JwA6da"}) or soup.find("div", {"class": "Vn250d"})
+        change_pct = 0.0
+        if change_elem:
+            c_text = change_elem.text.replace("%", "").replace("+", "").replace(",", "").strip()
+            try:
+                change_pct = float(c_text)
+            except ValueError:
+                pass
+
+        prev_close = round(price / (1 + change_pct / 100), 2) if change_pct != -100 else price
+        return {
+            "price": price,
+            "prev_close": prev_close,
+            "change_pct": round(change_pct, 2),
+            "source": "Google Finance",
+        }
+    except Exception as exc:
+        log.debug(f"Google Finance scrape {ticker}: {exc}")
+        return None
+
+
+def _get_idx_market_data(ticker: str) -> Optional[dict]:
+    """Fetch daily summary & historical technicals from IDX Official API."""
+    try:
+        idx = get_idx_source()
+        summary = _run_async(idx.get_daily_summary(ticker))
+        if not summary or summary.close <= 0:
+            return None
+
+        hist = _run_async(idx.get_historical_dataframe(ticker, days=365))
+        if not hist.empty and len(hist) >= 20:
+            technical = _calc_technical(hist)
+        else:
+            technical = {}
+
+        vol = summary.volume
+        price = summary.close
+        prev = (
+            summary.open
+            if summary.open > 0
+            else (round(price / (1 + summary.change_pct / 100), 2) if summary.change_pct != -100 else price)
+        )
+        daily_val = summary.value if summary.value > 0 else price * vol
+        avg_vol = int(hist["Volume"].tail(20).mean()) if (not hist.empty and "Volume" in hist.columns) else vol
+
+        market = {
+            "price": round(price, 2),
+            "prev_close": round(prev, 2),
+            "change_pct": summary.change_pct,
+            "day_high": round(summary.high, 2) if summary.high > 0 else price,
+            "day_low": round(summary.low, 2) if summary.low > 0 else price,
+            "volume": int(vol),
+            "avg_volume": int(avg_vol),
+            "vol_ratio": round(vol / avg_vol, 2) if avg_vol > 0 else 1.0,
+            "market_cap": "N/A",
+            "market_cap_raw": 0,
+            "value_raw": daily_val,
+            "daily_value": _fmt_idr(daily_val),
+            "source": "IDX Official",
+        }
+        return {
+            "ticker": ticker,
+            "market": market,
+            "technical": technical,
+            "summary": summary,
+        }
+    except Exception as exc:
+        log.debug(f"IDX market data {ticker}: {exc}")
+        return None
+
+
 def _merge_fundamental(yf_data, sectors_data, sectors_fin):
     base = yf_data.get("fundamental", {})
     sector_label = get_sector_context(yf_data.get("ticker", ""), yf_data.get("sector", "")).get("label", "")
     if not sectors_data and not sectors_fin:
         return base
     if sectors_data:
-        base["per"] = round(_safe(sectors_data.get("pe_ratio", sectors_data.get("per", base["per"]))), 2)
+        base["per"] = round(_safe(sectors_data.get("pe_ratio", sectors_data.get("per", base.get("per", 0)))), 2)
         pbv_raw = _safe(sectors_data.get("pb_ratio", sectors_data.get("pbv", base.get("pbv", 0))))
         if 0 < pbv_raw <= 100:
             base["pbv"] = round(pbv_raw, 2)
-        base["roe"] = round(_safe(sectors_data.get("roe", base["roe"])), 2)
-        sectors_der = _safe(sectors_data.get("debt_to_equity", base["der"]))
+        base["roe"] = round(_safe(sectors_data.get("roe", base.get("roe", 0))), 2)
+        sectors_der = _safe(sectors_data.get("debt_to_equity", base.get("der", 0)))
         base["der"] = normalize_der(sectors_der, sector_label)
     if sectors_fin:
-        base["revenue_growth"] = round(_safe(sectors_fin.get("revenue_growth", base["revenue_growth"])), 2)
-        base["eps_growth"] = round(_safe(sectors_fin.get("eps_growth", base["eps_growth"])), 2)
+        base["revenue_growth"] = round(_safe(sectors_fin.get("revenue_growth", base.get("revenue_growth", 0))), 2)
+        base["eps_growth"] = round(_safe(sectors_fin.get("eps_growth", base.get("eps_growth", 0))), 2)
     return base
 
 
 def _get_flow(ticker: str) -> dict:
+    # Try IDX official API first (most accurate, free)
+    try:
+        idx_flow = _run_async(get_idx_source().get_foreign_flow(ticker))
+        if idx_flow and idx_flow.get("net_raw", 0) != 0:
+            fb = idx_flow["foreign_buy"]
+            fs = idx_flow["foreign_sell"]
+            fn = idx_flow["net_raw"]
+            return {
+                "foreign_buy": _fmt_lot(fb),
+                "foreign_sell": _fmt_lot(fs),
+                "net_foreign": _fmt_lot(fn),
+                "net_raw": fn,
+                "signal": idx_flow["signal"],
+                "source": "IDX Official",
+            }
+    except Exception:
+        pass
+
     sf = get_sectors_flow(ticker)
     if sf:
         fb = _safe(sf.get("foreign_buy", sf.get("foreignBuy", 0)))
@@ -630,8 +758,11 @@ def _get_flow(ticker: str) -> dict:
             }
 
     idx_endpoints = [
-        ("https://idx.co.id/umbraco/Surface/StockData/GetTradingSummary", {"code": ticker, "lang": "id"}),
-        (f"https://idx.co.id/api/stock-summary?code={ticker}", {}),
+        ("https://www.idx.co.id/primary/TradingSummary/GetStockSummary", {
+            "date": datetime.now().strftime("%Y%m%d"),
+            "start": 0,
+            "length": 1000,
+        }),
     ]
     for url, params in idx_endpoints:
         try:
@@ -640,9 +771,16 @@ def _get_flow(ticker: str) -> dict:
                 text = resp.text.strip()
                 if text and text not in ("null", "[]", "{}", ""):
                     data = resp.json() or {}
-                    fb = _safe(data.get("ForeignBuy") or data.get("foreignBuy") or data.get("foreign_buy") or 0)
-                    fs = _safe(data.get("ForeignSell") or data.get("foreignSell") or data.get("foreign_sell") or 0)
-                    fn = _safe(data.get("ForeignNet") or data.get("foreignNet") or data.get("foreign_net") or (fb - fs))
+                    row = data
+                    if isinstance(data, dict) and data.get("data"):
+                        row = next(
+                            (r for r in data["data"]
+                             if (r.get("StockCode") or "").strip().upper() == ticker.upper()),
+                            {},
+                        )
+                    fb = _safe(row.get("ForeignBuy") or row.get("foreignBuy") or row.get("foreign_buy") or 0)
+                    fs = _safe(row.get("ForeignSell") or row.get("foreignSell") or row.get("foreign_sell") or 0)
+                    fn = _safe(row.get("ForeignNet") or row.get("foreignNet") or row.get("foreign_net") or (fb - fs))
                     if fb > 0 or fs > 0:
                         return {
                             "foreign_buy": _fmt_lot(fb),
@@ -700,11 +838,42 @@ def get_stock_data(ticker: str) -> dict:
 
     sectors_data = get_sectors_stock(ticker)
     sectors_fin = get_sectors_financials(ticker) if sectors_data else None
-    yf_data = _get_yfinance_data(ticker)
-    if "error" in yf_data:
-        return yf_data
 
-    fundamental = _merge_fundamental(yf_data, sectors_data, sectors_fin)
+    # Priority 1: IDX Official API
+    idx_market = _get_idx_market_data(ticker)
+
+    yf_data = _get_yfinance_data(ticker)
+    if "error" in yf_data and not idx_market:
+        # Priority 3: Fallback Google Finance
+        gf_data = get_price_googlefinance(ticker)
+        if gf_data:
+            yf_data = {
+                "ticker": ticker,
+                "company_name": ticker,
+                "sector": "N/A",
+                "industry": "N/A",
+                "market": {
+                    "price": gf_data["price"],
+                    "prev_close": gf_data["prev_close"],
+                    "change_pct": gf_data["change_pct"],
+                    "day_high": gf_data["price"],
+                    "day_low": gf_data["price"],
+                    "volume": 0,
+                    "avg_volume": 1,
+                    "vol_ratio": 1.0,
+                    "market_cap": "N/A",
+                    "market_cap_raw": 0,
+                    "value_raw": 0,
+                    "daily_value": "N/A",
+                    "source": "Google Finance",
+                },
+                "fundamental": {},
+                "technical": {},
+            }
+        else:
+            return yf_data
+
+    fundamental = _merge_fundamental(yf_data if isinstance(yf_data, dict) else {}, sectors_data, sectors_fin)
     if _safe(fundamental.get("pbv", 0)) > 100:
         if sectors_data:
             pbv_sectors = _safe(sectors_data.get("pb_ratio", sectors_data.get("pbv", 0)))
@@ -714,10 +883,20 @@ def get_stock_data(ticker: str) -> dict:
         else:
             fundamental["pbv"] = 0.0
 
-    market = yf_data["market"]
-    technical = yf_data["technical"]
+    # Overwrite market/technical if IDX Official API was successful
+    if idx_market:
+        market = idx_market["market"]
+        # Retain market cap from fundamental/yf
+        if isinstance(yf_data, dict) and "market" in yf_data:
+            market["market_cap"] = yf_data["market"].get("market_cap", "N/A")
+            market["market_cap_raw"] = yf_data["market"].get("market_cap_raw", 0)
+        technical = idx_market["technical"] or (yf_data.get("technical") if isinstance(yf_data, dict) else {})
+    else:
+        market = yf_data["market"]
+        technical = yf_data["technical"]
+
     flow = _get_flow(ticker)
-    sector_ctx = get_sector_context(ticker, yf_data.get("sector", ""))
+    sector_ctx = get_sector_context(ticker, yf_data.get("sector", "") if isinstance(yf_data, dict) else "")
     coal_data = get_coal_price() if sector_ctx["label"] == "Coal Mining" else {}
 
     mktcap_t = _safe(fundamental.get("market_cap_raw", 0)) / 1e12
@@ -731,9 +910,9 @@ def get_stock_data(ticker: str) -> dict:
     score = compute_score(fundamental, technical, flow, sector_ctx, coal_data)
     result = {
         "ticker": ticker,
-        "company_name": yf_data.get("company_name", ticker),
-        "sector": yf_data.get("sector", "N/A"),
-        "industry": yf_data.get("industry", "N/A"),
+        "company_name": yf_data.get("company_name", ticker) if isinstance(yf_data, dict) else ticker,
+        "sector": yf_data.get("sector", "N/A") if isinstance(yf_data, dict) else "N/A",
+        "industry": yf_data.get("industry", "N/A") if isinstance(yf_data, dict) else "N/A",
         "sector_context": sector_ctx,
         "coal_data": coal_data,
         "liquid": liquid,
@@ -747,3 +926,4 @@ def get_stock_data(ticker: str) -> dict:
         "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M WIB"),
     }
     return _stock_data_cache.set(("stock_data", ticker), result, STOCK_DATA_TTL_SECONDS)
+

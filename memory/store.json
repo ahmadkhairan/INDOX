@@ -1,0 +1,16 @@
+[
+  {
+    "id": "c56aed46-b900-47ca-b518-f279575ae7a6",
+    "content": "[TOWR] Score:55.1 Signal:HOLD | Berikut adalah analisis TOWR — PT Sarana Menara Nusantara Tbk.:\n\n1. **Ringkasan kondisi**: Saat ini, TOWR berada dalam kondisi bullish sedang dengan harga Rp390 (+0.52%). Sentimen pasar sedang netral dengan vol ratio 0.00x dan flow net sell (proxy: inst <15%). Regime pasar juga sedang bullish sedang.\n\n2. **Teknikal detail**: \n- Trend: Bullish sedang\n- Momentum: RSI=35.7 (neutral), StochRSI K:5.6 D",
+    "metadata": {
+      "ticker": "TOWR",
+      "score": 55.1,
+      "signal": "HOLD",
+      "ts": "2026-08-14T09:10:31.132763",
+      "confidence": "Low",
+      "entry_quality": "WEAK",
+      "preferred_mode": "WAIT",
+      "sector": "Property"
+    }
+  }
+]

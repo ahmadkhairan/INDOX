@@ -193,7 +193,41 @@ class PicksCog(commands.Cog):
         await loop.run_in_executor(
             None, lambda: tracker.record_run(today, selected_rows, shortlist)
         )
+        
+        # Auto-journal picks into PaperTrader for tracking
+        try:
+            from execution.paper_trader import get_paper_trader
+            pt = get_paper_trader()
+            for ticker in selected_tickers[:3]:
+                item = shortlist_map.get(ticker)
+                if not item:
+                    continue
+                price = item.get("market", {}).get("price", 0)
+                tech = item.get("technical", {})
+                sl = tech.get("aggressive_sl") or tech.get("atr_sl") or (price * 0.95)
+                tp1 = tech.get("aggressive_tp1") or tech.get("atr_tp1") or (price * 1.05)
+                tp2 = tech.get("aggressive_tp2") or tech.get("atr_tp2") or (price * 1.10)
+                if price > 0 and sl < price < tp1 < tp2:
+                    if pt.has_open_trade(ticker, source="daily_pick", on_date=today):
+                        continue
+                    try:
+                        pt.enter(
+                            ticker=ticker,
+                            entry_price=price,
+                            sl=round(sl, 0),
+                            tp1=round(tp1, 0),
+                            tp2=round(tp2, 0),
+                            signal=item.get("quant", {}),
+                            source="daily_pick",
+                            notes=f"Auto Pick {today}",
+                        )
+                    except Exception as exc:
+                        print(f"[picks] Paper entry {ticker}: {exc}")
+        except Exception as exc:
+            print(f"[picks] Paper trader auto-journal error: {exc}")
+
         asyncio.create_task(self._refresh_tracker_background())
+
 
         if caution_prefix:
             response = caution_prefix + response

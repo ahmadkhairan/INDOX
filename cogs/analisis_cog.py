@@ -13,6 +13,7 @@ from discord import app_commands
 from utils.command_limits import ANALYSIS_COOLDOWN
 from utils.ai_engine import analyze_ticker
 from memory.simple_memory import get_memory
+from config import FEATURE_VECTOR_MEMORY
 from utils.helpers import send_long, split_msg
 from utils.market_regime import get_coal_price, get_ihsg_regime
 from utils.news_utils import detect_special_news, get_berita
@@ -92,6 +93,16 @@ class AnalisisCog(commands.Cog):
         # Build pertanyaan dengan memory context
         mem_ctx = mem.build_context(ticker)
 
+        # RAG context dari VectorMemory
+        rag_ctx = ""
+        if FEATURE_VECTOR_MEMORY:
+            try:
+                from memory.vector_memory import get_vector_memory
+                vm = await get_vector_memory()
+                rag_ctx = await vm.get_rag_context(ticker, pertanyaan or "analisis")
+            except Exception:
+                pass
+
         # Regime warning
         regime_warning = ""
         if regime.get("regime") in ("BEAR", "CAUTION"):
@@ -104,7 +115,7 @@ class AnalisisCog(commands.Cog):
         if special["has_dividend"]:
             special_ctx += f"\n💰 DIVIDEN DETECTED: {'; '.join(special['dividend_news'])}"
 
-        full_context = "\n".join(filter(None, [mem_ctx, regime_warning, special_ctx, pertanyaan]))
+        full_context = "\n".join(filter(None, [mem_ctx, rag_ctx, regime_warning, special_ctx, pertanyaan]))
 
         # Panggil AI
         response = await loop.run_in_executor(None, analyze_ticker, data, news, full_context)
@@ -128,6 +139,22 @@ class AnalisisCog(commands.Cog):
                 "sector": sc.get("label", "N/A"),
             }
         )
+
+        if FEATURE_VECTOR_MEMORY:
+            try:
+                from memory.vector_memory import get_vector_memory
+                vm = await get_vector_memory()
+                await vm.add_analysis(
+                    ticker, response, total_s, action,
+                    extra={
+                        "confidence": confidence,
+                        "entry_quality": entry_q,
+                        "preferred_mode": preferred_mode,
+                        "sector": sc.get("label", "N/A"),
+                    }
+                )
+            except Exception:
+                pass
 
         if wait_msg:
             await wait_msg.delete()

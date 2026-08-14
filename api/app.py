@@ -140,6 +140,14 @@ async def analyze(req: AnalyzeReq, _: bool = Depends(auth)):
             except Exception: pass
         analysis = await analyze_ticker_v4(data=data,news=news,user_question=req.user_question,
                                             rag_context=rag_ctx,sentiment=sent_dict,var_result=var_dict)
+        from config import FEATURE_VECTOR_MEMORY
+        if FEATURE_VECTOR_MEMORY:
+            try:
+                score_val = data.get("score", {}).get("total", 0.0) if isinstance(data, dict) else 0.0
+                signal_val = "BUY" if score_val >= 65 else ("HOLD" if score_val >= 45 else "AVOID")
+                vm = await get_vector_memory()
+                await vm.add_analysis(ticker, analysis, score_val, signal_val)
+            except Exception: pass
         return {"ticker":ticker,"analysis":analysis,"sentiment":sent_dict,"var":var_dict,
                 "timestamp":time.strftime("%Y-%m-%d %H:%M:%S")}
     except ValueError as exc: raise HTTPException(400, str(exc))

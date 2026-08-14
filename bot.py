@@ -83,6 +83,7 @@ COGS = [
     "cogs.chat_cog",
     "cogs.risk_cog",
     "cogs.backtest_cog",
+    "cogs.paper_cog",
 ]
 
 @bot.event
