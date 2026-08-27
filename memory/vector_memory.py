@@ -7,6 +7,9 @@ from utils.json_store import read_json, write_json
 from config import FEATURE_VECTOR_MEMORY
 log = get_logger("memory.vector")
 
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 _CHROMA = False; _EMBED = False; _embedder: Any = None; _SentenceTransformer: Any = None
 try:
     import chromadb

@@ -11,16 +11,19 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from config import DAILY_CHANNEL_ID, DAILY_HOUR_UTC, DAILY_MINUTE, DEFAULT_WATCHLIST
+from core.ai_engine import generate_daily_picks_v4
 from data.alert_store_sqlite import get_picks_cache_date, set_picks_cache_date
 from data.picks_tracker import get_picks_tracker
-from utils.ai_engine import generate_daily_picks
 from utils.command_limits import PICKS_COOLDOWN
 from utils.helpers import send_long, split_msg
+from utils.logger import get_logger
 from utils.market_regime import get_coal_price, get_ihsg_regime
 from utils.messages import Msg
 from utils.news_utils import get_berita
 from utils.picks_engine import build_quant_shortlist, extract_selected_tickers
 from utils.scan_utils import scan_all_liquid_idx, scan_watchlist
+
+log = get_logger("cogs.picks")
 
 
 class PicksCog(commands.Cog):
@@ -57,29 +60,47 @@ class PicksCog(commands.Cog):
 
     @commands.command(name="picks", aliases=["p", "daily"])
     @commands.cooldown(*PICKS_COOLDOWN, commands.BucketType.user)
-    async def cmd_picks(self, ctx):
-        """!picks — daily top 3 swing picks dari seluruh IDX liquid"""
+    async def cmd_picks(self, ctx, *args):
+        """!picks [force] — daily top 3 swing picks dari seluruh IDX liquid"""
+        force = any(a.lower() in ("force", "-f", "--force", "reload", "refresh") for a in args)
         msg = await ctx.reply(Msg.picks_scanning())
-        response = await self._fetch_picks(force=True, progress=msg.edit)
-        await msg.delete()
+        try:
+            response = await self._fetch_picks(force=force, progress=msg.edit)
+        except Exception as exc:
+            log.error(f"!picks command error: {exc}", exc_info=True)
+            await msg.edit(content=f"❌ Gagal memproses picks: `{exc}`")
+            return
+
+        try:
+            await msg.delete()
+        except Exception:
+            pass
         await send_long(ctx.channel, response, reply_to=ctx.message)
 
     # ── Slash command ─────────────────────────────────────
 
     @app_commands.command(name="picks", description="Daily top 3 swing picks dari seluruh IDX liquid")
+    @app_commands.describe(force="Paksa scan ulang dari pasar (default: false)")
     @app_commands.checks.cooldown(*PICKS_COOLDOWN)
-    async def slash_picks(self, interaction: discord.Interaction):
+    async def slash_picks(self, interaction: discord.Interaction, force: bool = False):
         await interaction.response.defer(thinking=True)
 
         async def _progress(content: str):
-            await interaction.edit_original_response(content=content)
+            try:
+                await interaction.edit_original_response(content=content)
+            except Exception:
+                pass
 
-        response = await self._fetch_picks(force=True, progress=_progress)
-        chunks = split_msg(response)
-        await interaction.edit_original_response(content=chunks[0])
-        for c in chunks[1:]:
-            await interaction.followup.send(c)
-            await asyncio.sleep(0.3)
+        try:
+            response = await self._fetch_picks(force=force, progress=_progress)
+            chunks = split_msg(response)
+            await interaction.edit_original_response(content=chunks[0])
+            for c in chunks[1:]:
+                await interaction.followup.send(c)
+                await asyncio.sleep(0.3)
+        except Exception as exc:
+            log.error(f"/picks slash command error: {exc}", exc_info=True)
+            await interaction.edit_original_response(content=f"❌ Gagal memproses picks: `{exc}`")
 
     @commands.command(name="pickstats", aliases=["picksperf", "pickrate"])
     @commands.cooldown(*PICKS_COOLDOWN, commands.BucketType.user)
@@ -110,6 +131,7 @@ class PicksCog(commands.Cog):
                 ma_label=regime.get("ma_label", "MA50"),
             )
             self._picks_cache = msg
+            set_picks_cache_date(today)
             return msg
 
         caution_prefix = ""
@@ -142,7 +164,7 @@ class PicksCog(commands.Cog):
             if len(candidates) < 3:
                 candidates = await loop.run_in_executor(None, scan_watchlist, DEFAULT_WATCHLIST)
         except Exception as exc:
-            print(f"[picks] ⚠️ scan_all_liquid_idx error: {exc} — fallback ke watchlist")
+            log.warning(f"[picks] scan_all_liquid_idx error: {exc} — fallback ke watchlist")
             candidates = await loop.run_in_executor(None, scan_watchlist, DEFAULT_WATCHLIST)
 
         await self._notify_progress(progress, Msg.picks_news())
@@ -158,13 +180,31 @@ class PicksCog(commands.Cog):
                 "Tidak ada saham yang dipaksakan masuk ke picks."
             )
             self._picks_cache = message
+            set_picks_cache_date(today)
             return message
         shortlist = eligible_shortlist
 
         await self._notify_progress(progress, Msg.picks_ai())
-        response = await loop.run_in_executor(
-            None, generate_daily_picks, shortlist, news_ctx, regime, coal
-        )
+        try:
+            response = await asyncio.wait_for(
+                generate_daily_picks_v4(shortlist, news_ctx, regime, coal),
+                timeout=75.0,
+            )
+        except asyncio.TimeoutError:
+            log.warning("[picks] generate_daily_picks_v4 timeout setelah 75s — beralih ke Quant Fallback Report")
+            response = ""
+        except Exception as exc:
+            log.warning(f"[picks] generate_daily_picks_v4 error: {exc} — beralih ke Quant Fallback Report")
+            response = ""
+
+        # Validate response: jika AI kosong atau mengembalikan pesan error, fallback ke Quant Report
+        response = (response or "").strip()
+        if not response or response.startswith("❌ Error"):
+            log.info("[picks] Mengaktifkan Quant Fail-Safe Report (otomatis)")
+            response = self._build_quant_fallback_report(shortlist, regime, coal, today)
+
+        if caution_prefix:
+            response = caution_prefix + response
 
         tracker = get_picks_tracker()
         selected_tickers = extract_selected_tickers(
@@ -222,17 +262,114 @@ class PicksCog(commands.Cog):
                             notes=f"Auto Pick {today}",
                         )
                     except Exception as exc:
-                        print(f"[picks] Paper entry {ticker}: {exc}")
+                        log.warning(f"[picks] Paper entry {ticker}: {exc}")
         except Exception as exc:
-            print(f"[picks] Paper trader auto-journal error: {exc}")
+            log.warning(f"[picks] Paper trader auto-journal error: {exc}")
 
         asyncio.create_task(self._refresh_tracker_background())
 
-
-        if caution_prefix:
-            response = caution_prefix + response
         self._picks_cache = response
+        set_picks_cache_date(today)
         return response
+
+    def _build_quant_fallback_report(
+        self,
+        shortlist: list[dict],
+        regime: dict | None,
+        coal: dict | None,
+        today_str: str,
+    ) -> str:
+        try:
+            date_obj = datetime.strptime(today_str, "%Y-%m-%d")
+        except Exception:
+            date_obj = datetime.utcnow()
+        date_formatted = date_obj.strftime("%d %b %Y")
+
+        regime_blk = ""
+        if regime:
+            regime_blk = f"IHSG REGIME: {regime.get('regime', 'N/A')} | {regime.get('warning', '')}\n\n"
+
+        lines = [
+            f"**DAILY PICKS IDX — {date_formatted} [Quant Engine]**",
+            f"{regime_blk}ℹ️ *Catatan: Mode Fail-Safe Kuantitatif (Dihasilkan langsung dari screening algoritma quant IDX).* \n",
+        ]
+
+        for i, item in enumerate(shortlist[:3], 1):
+            ticker = item.get("ticker", "N/A")
+            company = item.get("company_name", "")
+            sc = item.get("sector_context", {})
+            sector_label = sc.get("label", item.get("sector", "N/A"))
+            mkt = item.get("market", {})
+            price = mkt.get("price", 0) or 0
+            vol_ratio = mkt.get("vol_ratio", 1.0) or 1.0
+            fl = item.get("flow", {})
+            f = item.get("fundamental", {})
+            t = item.get("technical", {})
+            s = item.get("score", {})
+            q = item.get("quant", {})
+            pos = item.get("position_sizing", {})
+
+            labels = []
+            if vol_ratio >= 2.0:
+                labels.append("HOT VOL")
+            if fl.get("net_raw", 0) > 50000:
+                labels.append("FOREIGN RUSH")
+            if sector_label == "Coal Mining" and coal and coal.get("rally"):
+                labels.append("COAL RALLY")
+            if f.get("dividend_yield", 0) >= 5.0:
+                labels.append("HIGH DIV")
+            labels_str = f" [{', '.join(labels)}]" if labels else ""
+
+            score_val = s.get("total", 0)
+            grade = s.get("grade", "N/A")
+            rsi = t.get("rsi", 50.0)
+            adx = t.get("adx", 0.0)
+            trend = str(t.get("trend", "N/A")).capitalize()
+
+            q_rank = q.get("rank", i)
+            q_score = q.get("score", 0.0)
+            mode = s.get("preferred_entry_mode", t.get("preferred_entry_mode", "MOMENTUM"))
+            signals = s.get("aggressive_signal_count", t.get("aggressive_signal_count", 0))
+
+            sl = round(t.get("aggressive_sl") or t.get("atr_sl") or (price * 0.95), 0)
+            tp1 = round(t.get("aggressive_tp1") or t.get("atr_tp1") or (price * 1.05), 0)
+            tp2 = round(t.get("aggressive_tp2") or t.get("atr_tp2") or (price * 1.10), 0)
+            tp1_pct = ((tp1 - price) / price * 100) if price > 0 else 0
+            tp2_pct = ((tp2 - price) / price * 100) if price > 0 else 0
+            rr = t.get("atr_rr", 0.0)
+
+            risk_trade = pos.get("risk_pct", 1.0)
+            retail_size = pos.get("retail_position_pct", 10.0)
+            retail_band = pos.get("retail_band", "10-15%")
+
+            confidence = s.get("confidence", "Medium")
+            win_prob = s.get("win_probability", 65.0)
+            flow_sig = fl.get("signal", "Netral")
+
+            alasan = (
+                f"Setup {mode} terkonfirmasi dengan ADX {adx:.1f} ({trend}), "
+                f"volume ratio {vol_ratio:.1f}x, dan R/R 1:{rr:.2f} yang memenuhi kriteria risk-adjusted return."
+            )
+            konfirmasi = (
+                f"1. Volume entry terkonfirmasi >= 1.0x rata-rata 20-hari. "
+                f"2. Harga bertahan di atas support SL Rp{sl:,.0f}."
+            )
+
+            lines.append(f"**PICK #{i}: {ticker} — {company}**")
+            lines.append(f"Sektor: {sector_label}{labels_str}")
+            lines.append(f"Score: {score_val:.1f}/100 Grade {grade} | RSI: {rsi:.1f} | ADX: {adx:.1f} | Trend: {trend}")
+            lines.append(f"Quant: Rank #{q_rank} | Quant Score {q_score:.1f}/100 | Mode: {mode} | Signals: {signals}/3")
+            lines.append(f"Entry: Rp{price:,.0f} | SL: Rp{sl:,.0f} | TP1: Rp{tp1:,.0f} (+{tp1_pct:.1f}%) TP2: Rp{tp2:,.0f} (+{tp2_pct:.1f}%)")
+            lines.append(f"R/R: 1:{rr:.2f} | Risk/Trade: {risk_trade:.1f}% | Retail Size: {retail_size:.0f}% ({retail_band})")
+            lines.append(f"Confidence: {confidence} | Win Prob: {win_prob:.1f}%")
+            lines.append(f"Flow: {flow_sig} | Alasan: {alasan}")
+            lines.append(f"Konfirmasi: {konfirmasi}\n")
+
+        reg_name = (regime or {}).get("regime", "NETRAL")
+        lines.append(f"**MARKET PULSE**: Kondisi IHSG {reg_name}. Screening quant menyaring {len(shortlist)} saham dengan R/R dan expected return positif.")
+        lines.append("*Analisis edukasi, bukan saran investasi.*")
+
+        return "\n".join(lines)
 
     async def _build_news_context(self, candidates: list[dict]) -> str:
         loop = asyncio.get_event_loop()

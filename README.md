@@ -128,7 +128,7 @@ Redis connection failures automatically fall back to an in-process dict with TTL
 
 ### AI Research Assistant
 
-- **Model**: Groq Cloud `llama-3.3-70b-versatile` with a 4-layer CIO prompt (macro → fundamental → technical → sentiment/flow).
+- **Model**: Groq Cloud `openai/gpt-oss-120b` (configurable via `GROQ_MODEL`, e.g. `qwen3.6-27b`) with a 4-layer CIO prompt (macro → fundamental → technical → sentiment/flow).
 - **Sector-aware rules**: Banking, coal, mining, and property tickers use different quality thresholds in the system prompt.
 - **Multi-entry framework**: Momentum, pullback, and breakout confluence with explicit entry zone, SL/TP, R/R, and position sizing output.
 - **RAG memory** (optional): ChromaDB + sentence-transformers store past analyses and news for retrieval-augmented context.

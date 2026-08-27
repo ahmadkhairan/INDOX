@@ -124,7 +124,10 @@ def chat_completion(messages: list[dict], system: str, max_tokens: int, temperat
                 text = _groq_call(provider, messages, system, max_tokens, temperature)
             else:
                 text = _openai_compatible_call(provider, messages, system, max_tokens, temperature)
-            return str(text).strip(), name
+            result = str(text or "").strip()
+            if not result or result.lower() == "none":
+                raise ValueError("Respon AI kosong dari provider")
+            return result, name
         except Exception as exc:
             errors.append(f"{name}: {exc}")
     raise RuntimeError("; ".join(errors) if errors else "belum ada AI provider yang dikonfigurasi")

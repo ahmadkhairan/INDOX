@@ -166,7 +166,7 @@ BERIKAN:
 
 ⚠️ Disclaimer: analisis edukasi, bukan saran investasi."""
 
-    return await _call_async([{"role":"user","content":prompt}], max_tokens=2600)
+    return await _call_async([{"role":"user","content":prompt}], max_tokens=max(GROQ_MAX_TOKENS, 3500))
 
 
 async def generate_daily_picks_v4(candidates, news_context, regime=None, coal_data=None, market_sentiment=None):
@@ -249,7 +249,7 @@ Konfirmasi: [kondisi HARUS terpenuhi sebelum entry]
 
 **MARKET PULSE**: [kondisi pasar + bias sektor]
 *Analisis edukasi, bukan saran investasi.*"""
-    return await _call_async([{"role":"user","content":prompt}], max_tokens=1800)
+    return await _call_async([{"role":"user","content":prompt}], max_tokens=max(GROQ_MAX_TOKENS, 3500))
 
 
 # Backward-compat sync wrappers

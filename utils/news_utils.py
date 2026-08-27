@@ -51,15 +51,18 @@ def get_berita(ticker: str, max_items: int = 5) -> list:
 
     if len(berita) < max_items:
         try:
+            import requests
             url = f"https://news.google.com/rss/search?q={ticker}+saham+IDX&hl=id&gl=ID&ceid=ID:id"
-            feed = feedparser.parse(url)
-            for entry in feed.entries[: max_items - len(berita)]:
-                berita.append({
-                    "title": entry.get("title", ""),
-                    "published": entry.get("published", "N/A"),
-                    "source": "Google News",
-                    "link": entry.get("link", ""),
-                })
+            resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+            if resp.status_code == 200:
+                feed = feedparser.parse(resp.content)
+                for entry in feed.entries[: max_items - len(berita)]:
+                    berita.append({
+                        "title": entry.get("title", ""),
+                        "published": entry.get("published", "N/A"),
+                        "source": "Google News",
+                        "link": entry.get("link", ""),
+                    })
         except Exception:
             pass
 

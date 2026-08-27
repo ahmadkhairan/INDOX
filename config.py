@@ -49,10 +49,10 @@ DAILY_CHANNEL_ID: Final[int] = int(os.getenv("DAILY_CHANNEL_ID", "0"))
 ALERT_CHANNEL_ID: Final[int] = int(os.getenv("ALERT_CHANNEL_ID", os.getenv("DAILY_CHANNEL_ID", "0")))
 
 GROQ_API_KEY: Final[str]       = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL: Final[str]         = "llama-3.3-70b-versatile"
-GROQ_MODEL_FAST: Final[str]    = "llama-3.1-8b-instant"
-GROQ_MAX_TOKENS: Final[int]    = 3000
-GROQ_TEMPERATURE: Final[float] = 0.20
+GROQ_MODEL: Final[str]         = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+GROQ_MODEL_FAST: Final[str]    = os.getenv("GROQ_MODEL_FAST", "llama-3.1-8b-instant")
+GROQ_MAX_TOKENS: Final[int]    = int(os.getenv("GROQ_MAX_TOKENS", "3500"))
+GROQ_TEMPERATURE: Final[float] = float(os.getenv("GROQ_TEMPERATURE", "0.20"))
 AI_PROVIDERS: Final[tuple[dict, ...]] = _load_ai_providers()
 
 SECTORS_API_KEY: Final[str] = os.getenv("SECTORS_API_KEY", "")

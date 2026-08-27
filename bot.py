@@ -4,7 +4,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from config import (
-    API_SECRET, DISCORD_TOKEN, GROQ_API_KEY, API_HOST, API_PORT, ENV,
+    API_SECRET, DISCORD_TOKEN, GROQ_API_KEY, GROQ_MODEL, API_HOST, API_PORT, ENV,
     FEATURE_PORTFOLIO_OPTIMIZER, FEATURE_RISK_ENGINE,
     FEATURE_SENTIMENT_PIPELINE, FEATURE_VECTOR_MEMORY,
     SENTIMENT_REFRESH_MINUTES,
@@ -19,7 +19,7 @@ log = get_logger("bot")
 ON_READY_BANNER = """
 ╔══════════════════════════════════════════════════╗
 ║   IDX Analyst Bot                                ║
-║   AI      : llama-3.3-70b (Groq)                ║
+║   AI      : {ai:<35} ║
 ║   Risk     : {risk}  Optimizer : {opt}           ║
 ║   RAG      : {rag}   Sentiment : {sent}          ║
 ║   Backtest : ✅  FastAPI : ✅                    ║
@@ -97,6 +97,7 @@ async def on_ready():
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="IDX v4 | !bantuan"))
     
     print(ON_READY_BANNER.format(
+        ai=f"{GROQ_MODEL} (Groq)",
         risk="✅" if FEATURE_RISK_ENGINE else "❌",
         opt="✅" if FEATURE_PORTFOLIO_OPTIMIZER else "❌",
         rag="✅" if FEATURE_VECTOR_MEMORY else "❌",
@@ -163,4 +164,8 @@ async def main():
         await bot.start(DISCORD_TOKEN)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        log.info("Bot dimatikan oleh pengguna (Ctrl+C). Keluar dengan aman.")
+
