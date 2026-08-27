@@ -1,34 +1,93 @@
-# Python
+# Python & Bytecode
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
 .Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Virtual environment — JANGAN di-commit
+# Virtual Environments
 .venv/
 venv/
 env/
 ENV/
+env.bak/
+venv.bak/
 
-# Environment variables — RAHASIA, jangan di-commit!
+# Environment Variables & Secrets
 .env
+.env.*
+!.env.example
 
-# Bot persistent data
+# Bot Persistent Data, Cache & Runtime Databases
 data/
-data/alerts.json
-data/daily_picks_history.json
-data/picks_cache_date.json
-data/all_liquid_tickers.json
-data/*.lock
-memory/memory_store.json
+data/*
+!data/.gitkeep
+memory/*.json
 memory/*.lock
 memory/chroma_db/
+chroma_db/
+execution/paper/*.json
+execution/paper/*.lock
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.lock
+*.bak
+*.bak.*
+*.tmp
+*.temp
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.tox/
+.nox/
+
+# Type Checking & Linters
+.mypy_cache/
+.pytype/
+.ruff_cache/
 
 # Logs
 *.log
 logs/
 
-# OS
+# IDEs & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-workspace
+*.sublime-project
+
+# OS Specific
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
