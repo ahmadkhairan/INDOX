@@ -13,11 +13,12 @@ class ApiBehaviorTests(unittest.TestCase):
     def setUp(self):
         self.secret_patch = patch.object(api_app, "API_SECRET", "super-secret")
         self.secret_patch.start()
-        self.client = TestClient(api_app.app)
+        self._client_cm = TestClient(api_app.app)
+        self.client = self._client_cm.__enter__()
 
     def tearDown(self):
+        self._client_cm.__exit__(None, None, None)
         self.secret_patch.stop()
-        self.client.close()
 
     def test_health_sets_api_version_header(self):
         response = self.client.get("/health")

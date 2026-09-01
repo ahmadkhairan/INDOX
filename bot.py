@@ -147,25 +147,37 @@ async def main():
             from memory.vector_memory import get_vector_memory
             await get_vector_memory()
         except Exception as exc: log.warning(f"Vector memory: {exc}")
-    async with bot:
-        asyncio.create_task(run_api_server())
-        # Groq Health Check (Issue #5) — sudah diaktifkan
-        from utils.groq_health import schedule_groq_health_check
-        asyncio.create_task(schedule_groq_health_check(delay_seconds=15))
-        
-        asyncio.create_task(run_sentiment_bg())
-        for cog in COGS:
-            try:
-                await bot.load_extension(cog)
-                log.info(f"Loaded: {cog}")
-            except Exception as exc:
-                log.warning(f"Cog load failed ({cog}): {exc}")
-        log.info("Connecting to Discord...")
-        await bot.start(DISCORD_TOKEN)
+    try:
+        async with bot:
+            asyncio.create_task(run_api_server())
+            # Groq Health Check (Issue #5) — sudah diaktifkan
+            from utils.groq_health import schedule_groq_health_check
+            asyncio.create_task(schedule_groq_health_check(delay_seconds=15))
+            
+            asyncio.create_task(run_sentiment_bg())
+            for cog in COGS:
+                try:
+                    await bot.load_extension(cog)
+                    log.info(f"Loaded: {cog}")
+                except Exception as exc:
+                    log.warning(f"Cog load failed ({cog}): {exc}")
+            log.info("Connecting to Discord...")
+            await bot.start(DISCORD_TOKEN)
+    finally:
+        log.info("Membersihkan resource & shared HTTP session...")
+        try:
+            from core.http_session import close_shared_session
+            await close_shared_session()
+        except Exception as exc:
+            log.warning(f"HTTP session cleanup: {exc}")
+        try:
+            from utils.idx_api import close_idx_source
+            await close_idx_source()
+        except Exception as exc:
+            log.warning(f"IDX source cleanup: {exc}")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         log.info("Bot dimatikan oleh pengguna (Ctrl+C). Keluar dengan aman.")
-

@@ -87,11 +87,12 @@ async def scrape_stockbit_forum(ticker: str) -> list[dict]:
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
     try:
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status != 200:
-                    return []
-                html = await resp.text(errors="ignore")
+        from core.http_session import get_shared_session
+        session = await get_shared_session()
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status != 200:
+                return []
+            html = await resp.text(errors="ignore")
         return _parse_stockbit_next_data(html, ticker_clean, url)
     except Exception as exc:
         log.debug(f"Stockbit scrape {ticker_clean}: {exc}")
@@ -150,11 +151,13 @@ async def scrape_telegram_signals(channels: Optional[list[str]] = None) -> list[
     }
     all_items: list[dict] = []
 
-    async with aiohttp.ClientSession(headers=headers) as session:
+    try:
+        from core.http_session import get_shared_session
+        session = await get_shared_session()
         for channel in ch_list:
             url = f"https://t.me/s/{channel}"
             try:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     if resp.status != 200:
                         log.debug(f"Telegram @{channel}: HTTP {resp.status}")
                         continue
@@ -164,5 +167,7 @@ async def scrape_telegram_signals(channels: Optional[list[str]] = None) -> list[
             except Exception as exc:
                 log.debug(f"Telegram scrape @{channel}: {exc}")
                 continue
+    except Exception as exc:
+        log.debug(f"Telegram shared session: {exc}")
 
     return all_items

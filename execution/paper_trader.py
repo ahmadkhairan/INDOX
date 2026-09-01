@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Optional
 
 from utils.logger import get_logger
+from utils.microstructure import round_to_tick
 
 log = get_logger("execution.paper")
 
@@ -98,6 +99,13 @@ class PaperTrader:
         """Catat paper trade entry. Return trade ID."""
         if entry_price <= 0:
             raise ValueError("entry_price harus > 0")
+
+        # Round entry, SL, TP ke fraksi harga resmi BEI
+        entry_price = round_to_tick(entry_price, "nearest")
+        sl = round_to_tick(sl, "floor")
+        tp1 = round_to_tick(tp1, "ceil")
+        tp2 = round_to_tick(tp2, "ceil")
+
         if not (sl < entry_price < tp1 < tp2):
             raise ValueError(
                 f"SL/TP tidak valid: harus sl({sl}) < entry({entry_price}) < tp1({tp1}) < tp2({tp2})"
@@ -139,6 +147,7 @@ class PaperTrader:
         reason: str = "MANUAL",
     ) -> bool:
         """Tutup trade secara manual."""
+        current_price = round_to_tick(current_price, "nearest")
         for t in self.trades:
             if t.id == trade_id and t.status != "CLOSED":
                 self._update_pnl(t, current_price)
@@ -196,9 +205,9 @@ class PaperTrader:
         if current_price >= trade.tp1 and trade.tp1_hit_date is None:
             trade.tp1_hit_date = datetime.now().isoformat()
             trade.status = "TP1_HIT"
-            new_sl = trade.entry_price * 1.002
+            new_sl = round_to_tick(trade.entry_price * 1.002, "floor")
             if new_sl > trade.sl:
-                trade.sl = round(new_sl, 0)
+                trade.sl = new_sl
             return "TP1"
 
         return None

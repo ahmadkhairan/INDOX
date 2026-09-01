@@ -26,6 +26,7 @@ from config import (
     WF_STEP_MONTHS,
 )
 from utils.logger import get_logger
+from utils.microstructure import round_to_tick
 from utils.position_sizer import adaptive_risk_pct, calc_position_size, kelly_aggressive
 from utils.ticker_utils import normalize_ticker
 from utils.yf_guard import get_history
@@ -278,7 +279,7 @@ class SingleBT:
         n,
     ) -> tuple[Optional[str], Optional[float], float]:
         hold = i - ei
-        new_trail = price - self.params.sl_mult * av
+        new_trail = round_to_tick(price - self.params.sl_mult * av, "floor")
         if new_trail > trail:
             trail = new_trail
 
@@ -287,7 +288,7 @@ class SingleBT:
         if hd >= tp2:
             return "TP2", tp2, trail
         if hd >= tp1:
-            trail = max(trail, ep * 1.002)
+            trail = max(trail, round_to_tick(ep * 1.002, "floor"))
 
         rsi_val = self._gv(rsi, i)
         if rsi_val > 75 and hold >= 3:
@@ -493,10 +494,11 @@ class SingleBT:
             )
 
             entry_mode, entry_price, cond_met = selected
+            entry_price = round_to_tick(entry_price, "nearest")
             entry_idx = i
-            sl = price - self.SL * av
-            tp1 = price + self.TP1 * av
-            tp2 = price + self.TP2 * av
+            sl = round_to_tick(price - self.SL * av, "floor")
+            tp1 = round_to_tick(price + self.TP1 * av, "ceil")
+            tp2 = round_to_tick(price + self.TP2 * av, "ceil")
             trail = sl
             in_trade = True
             eq.append(equity)

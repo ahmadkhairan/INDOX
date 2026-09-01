@@ -104,16 +104,14 @@ class IDXDataSource:
     TIMEOUT = aiohttp.ClientTimeout(total=12)
 
     def __init__(self):
-        self._session: Optional[aiohttp.ClientSession] = None
+        pass
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(headers=self.HEADERS)
-        return self._session
+        from core.http_session import get_shared_session
+        return await get_shared_session()
 
     async def close(self) -> None:
-        if self._session and not self._session.closed:
-            await self._session.close()
+        pass
 
     def _fetch_json_sync(self, path: str, params: dict) -> Optional[Any]:
         """Sync fetch via curl_cffi (bypasses Cloudflare when available)."""

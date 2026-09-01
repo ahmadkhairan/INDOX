@@ -108,20 +108,21 @@ class SentimentPipeline:
 
     async def _fetch_all(self):
         out = []
-        async with aiohttp.ClientSession() as sess:
-            tasks = [self._fetch_rss(sess, u) for u in NEWS_RSS_FEEDS] + [self._fetch_idx(sess)]
-            
-            # Additional free sentiment sources
-            try:
-                from sentiment.sources import scrape_stockbit_forum, scrape_telegram_signals
-                tasks.append(scrape_telegram_signals())
-                # Scrape stockbit for first 5 watchlist tickers to avoid rate limiting
-                for t in self._wl[:5]:
-                    tasks.append(scrape_stockbit_forum(t))
-            except Exception as exc:
-                log.warning(f"Error initializing extra sentiment sources: {exc}")
+        from core.http_session import get_shared_session
+        sess = await get_shared_session()
+        tasks = [self._fetch_rss(sess, u) for u in NEWS_RSS_FEEDS] + [self._fetch_idx(sess)]
+        
+        # Additional free sentiment sources
+        try:
+            from sentiment.sources import scrape_stockbit_forum, scrape_telegram_signals
+            tasks.append(scrape_telegram_signals())
+            # Scrape stockbit for first 5 watchlist tickers to avoid rate limiting
+            for t in self._wl[:5]:
+                tasks.append(scrape_stockbit_forum(t))
+        except Exception as exc:
+            log.warning(f"Error initializing extra sentiment sources: {exc}")
 
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         for r in results:
             if isinstance(r, list): out.extend(r)
         return out

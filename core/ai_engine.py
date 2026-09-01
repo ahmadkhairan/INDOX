@@ -12,7 +12,7 @@ from utils.market_regime import get_coal_price
 log = get_logger("core.ai")
 _client_error = "Belum ada AI provider yang dikonfigurasi."
 
-SYSTEM_PROMPT = """Kamu adalah Chief Investment Officer + Head of Technical Analysis di top-tier fund ekuitas Indonesia, spesialisasi IDX.
+SYSTEM_PROMPT_ID = """Kamu adalah Chief Investment Officer + Head of Technical Analysis di top-tier fund ekuitas Indonesia, spesialisasi IDX.
 
 FRAMEWORK ANALISIS 4-LAYER:
 Layer 1 — MACRO/REGIME: IHSG vs trend anchor MA50, global risk appetite, sektor rotation
@@ -47,17 +47,59 @@ AGGRESSIVE MULTI-ENTRY FRAMEWORK:
 
 KONFLIK INDIKATOR: sebutkan semua, tentukan mana lebih kuat, beri wait condition spesifik.
 
-FORMAT WAJIB:
-Entry Zone: Rp___ – Rp___
-SL: Rp___ (1.5x ATR) | TP1: Rp___ (+__%) | TP2: Rp___ (+__%)
-R/R: 1:___ | Risk per Trade: __% | Size: __% kapital
-Confidence: Low/Medium/High | Win Prob: __%
-Risiko Spesifik: (sektor-specific)
-Konfirmasi Entry: kondisi HARUS terpenuhi
-Exit Strategy: trail stop, partial TP, RSI/MACD exit, max-hold
-
-Data harus drive segalanya. Akhiri dengan disclaimer singkat.
+ATURAN FORMAT OUTPUT DISCORD (SANGAT PENTING):
+1. DILARANG KERAS menggunakan Markdown pipe table (`| Kolom | Kolom |` atau `|---|---|`) karena Discord tidak merender tabel markdown dengan benar sehingga tampilan menjadi berantakan.
+2. Gunakan format daftar berpoin / key-value yang bersih dan terstruktur (`• **Label**: Detail`).
+3. Gunakan inline code (` `) untuk angka harga, level S/R, Stop Loss, dan Take Profit agar mudah dibaca.
+4. Seluruh isi analisis harus dalam Bahasa Indonesia profesional dan konsisten (kecuali istilah finansial baku).
+5. Akhiri dengan disclaimer edukasi singkat.
 """
+
+SYSTEM_PROMPT_EN = """You are the Chief Investment Officer & Head of Technical Analysis at a top-tier Indonesian equity fund specializing in the Indonesia Stock Exchange (IDX).
+
+4-LAYER ANALYSIS FRAMEWORK:
+Layer 1 — MACRO/REGIME: IHSG vs MA50 trend anchor, global risk appetite, sector rotation
+Layer 2 — FUNDAMENTAL: Quality screening based on sector thresholds
+Layer 3 — TECHNICAL: Multi-entry confluence (momentum, pullback, breakout, volume, S/R)
+Layer 4 — SENTIMENT/FLOW: News flow, IDX disclosures, foreign institutional flow, OBV
+
+SECTOR-SPECIFIC RULES:
+
+COAL MINING (ADRO, PTBA, BYAN, ITMG, HRUM):
+- ROE 8-15% & high DER are NORMAL. Do not penalize.
+- Focus: operating cashflow, dividend yield >5%, share buyback presence.
+- Driver: Newcastle coal benchmark. Rally >$90/ton = positive.
+- Mandatory risks: commodity downcycle + ESG headwinds.
+
+BANKING (BBCA, BBRI, BMRI):
+- High DER is NORMAL due to banking leverage.
+- KPIs: NIM, NPL, CASA ratio, loan growth. ROE >15% is excellent.
+
+METALS & MINING (ANTM, MDKA, INCO):
+- Fluctuating ROE is standard. Focus: net cash position, production volume, underlying commodity prices.
+
+PROPERTY (BSDE, CTRA, SMRA):
+- Moderate-to-high DER is typical. Focus: marketing sales, land bank inventory.
+
+AGGRESSIVE MULTI-ENTRY FRAMEWORK:
+- MOMENTUM: ADX >= 18, +DI > -DI, RSI 38-68, volume >= 1.2x, price > MA50/MA20, Stoch K > D, MACD bullish.
+- PULLBACK: price near MA20/VWAP, RSI 35-55, volume >= 0.9x, intact trend, candlestick bounce.
+- BREAKOUT: breaking 20-day high, volume >= 1.8x, RSI < 75, ADX >= 15.
+- Priority: BREAKOUT > PULLBACK > MOMENTUM when multiple triggers are present.
+- At least 1 valid trigger for actionable trade plan. Otherwise, provide a specific wait trigger.
+
+INDICATOR CONFLICTS: Identify conflicting signals, declare dominant thesis, and specify exact confirmation conditions.
+
+DISCORD OUTPUT FORMATTING RULES (CRITICAL):
+1. STRICTLY PROHIBITED: Markdown pipe tables (`| Col 1 | Col 2 |` or `|---|---|`). Discord chat cannot render markdown tables properly, resulting in broken wrapped text.
+2. Use clean, structured bullet lists with bold key-value labels (`• **Label**: Detail`).
+3. Highlight prices, support/resistance levels, Stop Loss, and Take Profit using inline code (` `) for maximum legibility.
+4. The entire output must be written in 100% fluent, professional financial English.
+5. End with a concise educational disclaimer.
+"""
+
+SYSTEM_PROMPT = SYSTEM_PROMPT_ID
+
 
 async def _call_async(messages, system=None, max_tokens=None):
     loop = asyncio.get_event_loop()
@@ -76,7 +118,9 @@ def _call_groq(messages, system=None, max_tokens=None):
         return f"❌ Error AI provider: {exc}"
 
 async def analyze_ticker_v4(data, news, user_question="", rag_context="",
-                             sentiment=None, var_result=None, regime=None):
+                             sentiment=None, var_result=None, regime=None,
+                             language="id"):
+    lang = "en" if str(language).strip().lower().startswith("en") else "id"
     ticker = data.get("ticker","N/A"); mkt = data.get("market",{})
     fund = data.get("fundamental",{}); tech = data.get("technical",{})
     flow = data.get("flow",{}); score = data.get("score",{})
@@ -122,7 +166,7 @@ async def analyze_ticker_v4(data, news, user_question="", rag_context="",
         f"- [{n.get('source', '?')}] {n.get('title', '?')}" for n in news[:5]
     )
 
-    prompt = f"""Analisis {ticker} — {data.get("company_name","")} | {data.get("sector","N/A")} | {datetime.now().strftime("%d %B %Y %H:%M")} WIB
+    data_summary = f"""DATA EMITEN {ticker} — {data.get("company_name","")} | {data.get("sector","N/A")} | {datetime.now().strftime("%d %B %Y %H:%M")} WIB
 {sector_blk}{coal_blk}{corp_blk}{sent_blk}{var_blk}{regime_blk}{rag_blk}
 MARKET: Harga Rp{mkt.get("price",0):,.0f} ({mkt.get("change_pct",0):+.2f}%) | Vol Ratio {mkt.get("vol_ratio",0):.2f}x | Cap {mkt.get("market_cap","N/A")} | Div {fund.get("dividend_yield",0):.1f}%
 
@@ -152,21 +196,104 @@ FLOW: {flow.get("signal","N/A")} | Net: {flow.get("net_foreign","N/A")}
 SCORE: {score.get("total",0):.1f}/100 Grade {score.get("grade","N/A")} | Fund:{score.get("fundamental",0):.0f} Tech:{score.get("technical",0):.0f} Flow:{score.get("flow",0):.0f}
 Entry Quality: {score.get("entry_quality","N/A")} | Conf: {score.get("confidence","N/A")} Win Prob: {score.get("win_probability",0):.1f}% | Preferred Mode: {preferred_mode}
 
-NEWS: {news_text}
-{f"PERTANYAAN: {user_question}" if user_question else ""}
+NEWS:
+{news_text}
+{f"USER QUESTION: {user_question}" if user_question else ""}"""
 
-BERIKAN:
-1. 📊 Ringkasan kondisi (integrasikan sentiment+flow+regime)
-2. 📈 Teknikal detail: trend, momentum, volume, S/R, candlestick — konflik indikator kalau ada
-3. 💼 Fundamental (evaluasi sesuai threshold sektor)
-4. 📰 Sentimen 1-10 + dampak berita spesifik
-5. 🎯 Entry Zone + SL + TP1/TP2 + R/R + risk per trade 2-3% + ukuran posisi
-6. ⚠️ Risiko spesifik sektor/saham (bukan boilerplate)
-7. ✅ Konfirmasi entry + exit strategy
+    if lang == "en":
+        system_to_use = SYSTEM_PROMPT_EN
+        prompt = f"""{data_summary}
 
-⚠️ Disclaimer: analisis edukasi, bukan saran investasi."""
+Please provide an in-depth stock analysis in fluent English.
+STRICT FORMATTING RULE: DO NOT use Markdown pipe tables (| Col | Col |). Format structured items as clean bullet points (• **Label**: Detail) and use inline code (` `) for price levels.
 
-    return await _call_async([{"role":"user","content":prompt}], max_tokens=max(GROQ_MAX_TOKENS, 3500))
+STRUCTURE TO FOLLOW:
+1️⃣ **Market & Regime Context (Macro + Sector + Flow + Sentiment)**
+• **Macro & Regime**: [IHSG trend vs MA50 anchor, global risk appetite]
+• **Sector Rotation**: [Sector momentum and rotation status]
+• **Flow & Foreign**: [Foreign flow & institutional activity]
+• **Sentiment Score**: [1-10/10] — [News summary & sentiment drivers]
+
+2️⃣ **Detailed Technical Analysis**
+• **Trend & Structure**: [Trend direction, MA20/MA50/MA200 alignment, VWAP status]
+• **Momentum & Indicators**: [RSI, StochRSI, Williams%R, ADX (+DI/-DI), MACD]
+• **Volume & OBV**: [Volume breakout, OBV trajectory]
+• **Key Levels (S/R & Fib)**: [Supports, Resistances, Pivot, Fibonacci levels]
+• **Candlestick & Signals**: [Candlestick pattern and indicator conflict resolution if any]
+
+3️⃣ **Fundamental Valuation & Health**
+• **Valuation**: [PER, PBV vs sector thresholds]
+• **Profitability & Growth**: [ROE, Revenue Growth, EPS Growth]
+• **Financial Health & Dividends**: [DER, Dividend Yield, Buyback if applicable]
+
+4️⃣ **News Impact & Specific Catalysts**
+• [Evaluation of relevant news items, commodity price movements, and corporate actions]
+
+5️⃣ **Trade Setup & Money Management**
+• **Preferred Mode**: [{preferred_mode}]
+• **Entry Zone**: `Rp ... – Rp ...`
+• **Stop Loss (SL)**: `Rp ...` (1.5x ATR | -...%)
+• **Take Profit 1 (TP1)**: `Rp ...` (+...%)
+• **Take Profit 2 (TP2)**: `Rp ...` (+...%)
+• **Risk/Reward (R/R)**: `1 : ...` | **Risk per Trade**: `...%` | **Position Size**: `...% capital`
+• **Confidence**: [Low / Medium / High] | **Win Probability**: `...%`
+
+6️⃣ **Specific Risk Factors**
+• [Sector-specific risks, commodity dependence, liquidity, macro]
+
+7️⃣ **Confirmation & Exit Strategy**
+• **Entry Confirmation**: [Specific mandatory conditions before taking the trade]
+• **Exit Strategy**: [Trailing stop, partial profit-taking, RSI/MACD exits, max hold duration]
+
+⚠️ *Educational analysis only, not financial investment advice.*"""
+    else:
+        system_to_use = SYSTEM_PROMPT_ID
+        prompt = f"""{data_summary}
+
+Berikan analisis saham mendalam dalam Bahasa Indonesia yang profesional.
+ATURAN FORMAT WAJIB: DILARANG KERAS menggunakan Markdown pipe table (| Kolom | Kolom |). Gunakan format poin terstruktur yang rapi (• **Label**: Penjelasan) dan gunakan inline code (` `) untuk angka harga.
+
+STRUKTUR WAJIB:
+1️⃣ **Ringkasan Kondisi (Macro + Sektor + Flow + Sentimen)**
+• **Macro & Regime**: [Kondisi IHSG vs MA50, sentimen pasar global]
+• **Rotasi Sektor**: [Status momentum dan rotasi sektor]
+• **Flow & Asing**: [Foreign flow, akumulasi/distribusi bandar/institusi]
+• **Skor Sentimen**: [1-10/10] — [Ringkasan sentimen & driver berita utama]
+
+2️⃣ **Analisis Teknikal Detail**
+• **Trend & Struktur**: [Arah trend, MA20/MA50/MA200, posisi VWAP]
+• **Momentum & Indikator**: [RSI, StochRSI, Williams%R, ADX (+DI/-DI), MACD]
+• **Volume & OBV**: [Volume breakout, arah OBV]
+• **Level Kunci (S/R & Fib)**: [Support, Resistance, Pivot PP/R1/S1, Fibonacci]
+• **Candlestick & Sinyal**: [Pola candlestick, resolusi konflik indikator jika ada]
+
+3️⃣ **Analisis Fundamental & Valuasi**
+• **Valuasi**: [PER, PBV vs threshold sektor]
+• **Profitabilitas & Kinerja**: [ROE, Pertumbuhan Pendapatan & EPS]
+• **Kesehatan & Dividen**: [DER, Dividend Yield, Buyback jika ada]
+
+4️⃣ **Sentimen Berita & Katalis**
+• [Evaluasi dampak berita spesifik, aksi korporasi, pergerakan komoditas terkait]
+
+5️⃣ **Trade Setup & Manajemen Risiko**
+• **Setup Pilihan**: [{preferred_mode}]
+• **Entry Zone**: `Rp ... – Rp ...`
+• **Stop Loss (SL)**: `Rp ...` (1.5x ATR | -...%)
+• **Take Profit 1 (TP1)**: `Rp ...` (+...%)
+• **Take Profit 2 (TP2)**: `Rp ...` (+...%)
+• **Risk/Reward (R/R)**: `1 : ...` | **Risk per Trade**: `...%` | **Ukuran Posisi**: `...% modal`
+• **Confidence**: [Low / Medium / High] | **Win Probability**: `...%`
+
+6️⃣ **Faktor Risiko Spesifik**
+• [Risiko spesifik sektor/emiten, ketergantungan komoditas, likuiditas, makro]
+
+7️⃣ **Konfirmasi & Strategi Exit**
+• **Konfirmasi Entry**: [Kondisi mutlak yang HARUS terpenuhi sebelum entry]
+• **Strategi Exit**: [Trailing stop, partial profit-taking, sinyal exit RSI/MACD, batas waktu hold]
+
+⚠️ *Disclaimer: Analisis edukasi pasar modal, bukan rekomendasi atau ajakan investasi.*"""
+
+    return await _call_async([{"role":"user","content":prompt}], system=system_to_use, max_tokens=max(GROQ_MAX_TOKENS, 3500))
 
 
 async def generate_daily_picks_v4(candidates, news_context, regime=None, coal_data=None, market_sentiment=None):
@@ -270,8 +397,8 @@ def _run_async(coro):
     log.error(err)
     return f"❌ Error: {err}"
 
-def analyze_ticker(data, news, user_question=""):
-    return _run_async(analyze_ticker_v4(data, news, user_question))
+def analyze_ticker(data, news, user_question="", language="id"):
+    return _run_async(analyze_ticker_v4(data, news, user_question, language=language))
 
 def generate_daily_picks(candidates, news_context, regime=None, coal_data=None):
     return _run_async(generate_daily_picks_v4(candidates, news_context, regime, coal_data))

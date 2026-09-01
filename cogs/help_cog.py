@@ -32,59 +32,60 @@ class HelpCog(commands.Cog):
     @commands.command(name="bantuan", aliases=["h", "help_saham"])
     async def cmd_bantuan(self, ctx):
         embed = discord.Embed(
-            title="IDX Analyst Bot v4 — Panduan",
+            title="IDX Analyst Bot v4 — Panduan Perintah",
+            description="Gunakan prefix `!` atau Slash Command `/` untuk berinteraksi dengan bot.",
             color=discord.Color.blue(),
             timestamp=datetime.now(),
         )
         embed.add_field(
-            name="Commands Utama",
+            name="📊 Analisis & Pasar",
             value=(
-                "`!analisis TICKER` — Analisis lengkap 1 saham (AI Groq)\n"
-                "`!picks` — Daily top picks dari **scan seluruh IDX liquid**\n"
-                "`!market` — Overview IHSG + regime check + gainer/loser\n"
-                "`!portfolio` — Analisis portfolio (attach CSV)\n"
-                "`!alert TICKER > HARGA` — Notif harga via DM\n"
-                "`!backtest TICKER [BULAN]` — Backtest v4 + Monte Carlo\n"
-                "`!walkforward TICKER [TAHUN]` — Uji robustness walk-forward\n"
-                "`!montecarlo TICKER [BULAN]` — Simulasi distribusi return\n"
-                "`!backtest_legacy` — Deprecated, arahkan ke engine v4\n"
-                "`!watchlist` — Lihat daftar saham default\n"
-                "`!reset` — Reset history chat\n"
-                "`@bot [pertanyaan]` — Chat bebas tentang saham"
+                "• `!analisis TICKER [en/id]` — Analisis teknikal, fundamental & AI (Bilingual ID/EN)\n"
+                "• `!picks` — Daily top picks dari scan seluruh IDX\n"
+                "• `!market` — Status IHSG, regime market & top movers\n"
+                "• `!portfolio` — Analisis risiko & kesehatan portofolio (attach CSV)\n"
+                "• `!alert TICKER > HARGA` — Pasang notifikasi harga via DM\n"
+                "• `@bot [pertanyaan]` — Tanya jawab bebas seputar saham"
             ),
             inline=False,
         )
         embed.add_field(
-            name="Fitur Utama",
+            name="📝 Paper Trading & Jurnal",
             value=(
-                "1. **Scan seluruh IDX** di `!picks` (bukan hanya watchlist)\n"
-                "2. **IHSG Regime Filter** untuk menghentikan pick saat bear market\n"
-                "3. Deteksi buyback dan dividen dari berita terkini\n"
-                "4. Backtest v4 dengan multi-entry, dynamic exit, adaptive risk, dan Monte Carlo\n"
-                "5. Walk-forward test untuk memeriksa robustness strategi\n"
-                "6. Risk engine dan optimizer untuk analisis portfolio\n"
-                "7. FastAPI untuk akses fitur melalui endpoint"
+                "• `!paper list` — Lihat posisi paper trade yang OPEN\n"
+                "• `!paper stats` — Laporan statistik PnL, Win Rate & Profit Factor\n"
+                "• `!paper check` — Cek harga sekarang & evaluasi otomatis SL/TP\n"
+                "• `!paper enter TICKER ENTRY SL TP1 TP2 [LOT]` — Catat trade baru\n"
+                "• `!paper close ID HARGA` — Tutup posisi paper trade manual\n"
+                "• `!catat TICKER BUY/SELL HARGA LOT [NOTE]` — Jurnal trade real broker"
             ),
             inline=False,
         )
         embed.add_field(
-            name="Scoring Model",
+            name="🔬 Backtest & Validasi",
             value=(
-                "Setiap saham mendapat **score 0-100** berdasarkan:\n"
-                "1. Fundamental: 40% _(threshold menyesuaikan sektor)_\n"
-                "2. Teknikal: 30% _(momentum, pullback, dan breakout)_\n"
-                "3. Flow: 20% _(mining mendapat bobot ekstra)_\n"
-                "4. Bonus: coal rally, signal stack, dan quality setup"
+                "• `!backtest TICKER [BULAN]` — Backtest engine v4 + Monte Carlo\n"
+                "• `!walkforward TICKER [TAHUN]` — Uji robustness walk-forward\n"
+                "• `!montecarlo TICKER [BULAN]` — Simulasi probabilitas return & drawdown"
             ),
             inline=False,
         )
         embed.add_field(
-            name="Label Picks",
+            name="🛡️ Risk Engine & Optimizer",
             value=(
-                "HOT VOLUME — volume ratio ≥ 2x\n"
-                "FOREIGN RUSH — net buy asing besar\n"
-                "COAL RALLY — batubara > $90/ton\n"
-                "HIGH DIV — dividend yield ≥ 5%"
+                "• `!var TICKER` — Hitung Value at Risk (VaR & CVaR)\n"
+                "• `!stress TICKER1 TICKER2...` — Stress test skenario krisis pasar\n"
+                "• `!corr TICKER1 TICKER2...` — Matriks korelasi & diversifikasi\n"
+                "• `!optimize TICKER1 TICKER2...` — Optimasi bobot portofolio (Sharpe)\n"
+                "• `!kelly WIN_RATE WIN_LOSS_RATIO` — Kalkulator ukuran posisi Kelly"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="⚙️ Lainnya",
+            value=(
+                "• `!watchlist` — Daftar saham default\n"
+                "• `!reset` — Reset riwayat chat dengan bot"
             ),
             inline=False,
         )

@@ -30,6 +30,15 @@ async def lifespan(app: FastAPI):
         from memory.vector_memory import get_vector_memory; await get_vector_memory(); log.info("VecMem ready")
     except Exception as exc: log.warning(f"VecMem: {exc}")
     yield
+    # Shutdown sequence
+    try:
+        from core.http_session import close_shared_session
+        await close_shared_session()
+    except Exception as exc: log.warning(f"Shared session cleanup: {exc}")
+    try:
+        from utils.idx_api import close_idx_source
+        await close_idx_source()
+    except Exception as exc: log.warning(f"IDX source cleanup: {exc}")
 
 app = FastAPI(title="IDX Analyst Bot API v4", version="4.0.0", lifespan=lifespan,
               docs_url="/docs" if ENV != "production" else None)
@@ -106,6 +115,7 @@ async def ready():
 class AnalyzeReq(BaseModel):
     ticker: str; user_question: str = ""
     include_sentiment: bool = True; include_var: bool = True
+    language: str = "id"
 
 @api_v4.post("/analyze")
 async def analyze(req: AnalyzeReq, _: bool = Depends(auth)):
@@ -139,7 +149,8 @@ async def analyze(req: AnalyzeReq, _: bool = Depends(auth)):
                     var_dict = {"var_1d_95":vr.var_1d_95,"cvar_95":vr.cvar_95,"ann_vol":vr.ann_vol}
             except Exception: pass
         analysis = await analyze_ticker_v4(data=data,news=news,user_question=req.user_question,
-                                            rag_context=rag_ctx,sentiment=sent_dict,var_result=var_dict)
+                                            rag_context=rag_ctx,sentiment=sent_dict,var_result=var_dict,
+                                            language=req.language)
         from config import FEATURE_VECTOR_MEMORY
         if FEATURE_VECTOR_MEMORY:
             try:
